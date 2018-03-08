@@ -239,7 +239,7 @@ contains
     real*8,dimension(:,:),intent(out) :: xyz
     character(20) :: junk1, junk2, junk3, junk4
 
-    character(50) :: line
+    character(200) :: line
     integer :: inputstatus, i_line, i_atom, i_mole, index, nargs
     character(40),dimension(9)  :: args
     character(5) :: mname, aname
@@ -262,6 +262,7 @@ contains
     Read(ifile,'(A)',Iostat=inputstatus) line
     ! if its orthogonal, 3 arguments, if not 9 arguments
     call parse(line," ",args,nargs)
+
 
     Select Case(nargs)
     Case(3)
@@ -651,8 +652,7 @@ contains
           before(k:k)=ch
           cycle
        end if
-       if(ch /= ' ') then          ! character is a delimiter that is not a
-!          space
+       if(ch /= ' ') then          ! character is a delimiter that is not a  space
           str=str(i+1:)
           if(pres) sep=ch
           exit
