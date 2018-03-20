@@ -1,0 +1,8 @@
+ the code should be recompiled with the setting in glob_v.f90
+character(3), parameter :: Charge_density_Sq = 'no' 
+
+this is an example number density Sq calculation for a lamellar LLC of CO2_13_4 gemini surfactants
+at lambda=12.9 water content
+
+the structure factor should match that reported in
+McDaniel et al., JPCB, 2016, 120, 10860-10868

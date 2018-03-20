@@ -1,0 +1,25 @@
+we keep two different branches of this code,
+which share common subroutines.
+We try to minimize the code files in the
+different branches, and keep as much overlap as possbile in
+the common subroutines.  The reason we have two different
+branches is that the data structures get messy when
+computing correlation functions such as S(q,t)
+
+1) Sq_Average_FFT:
+   computes average structure factor, either charge density or number density
+   structure factor.  For charge density, can be split into cation, anion, and
+   total contribution.  For number density, can be split into partial atomic
+   structure factors.  This code returns 3D structure factors, S(qvec), which
+   may be used for analysis of anisotropic systems, or subsequently averaged
+   as a function of |qvec| using perl scripts.
+   
+
+2) Sq_Ct_FFT:
+   In addition to computing averaged structure factors, this branch computes correlation
+   functions, e.g. S(q,t) for structure factors.  In this code we assume isotropic system
+   so that we don't have correlation functions for all qvecs, and thus we internally average
+   over qvecs to output S(|qvec|,t)  
+
+Both of these branches share code in
+"source_shared" directory

@@ -1,0 +1,6 @@
+this is an example for computing charge density Sq, for bmim/bf4
+
+here we've cut the trajectory down to two frames to save space.
+output file contains Sq cation-cation, Sq anion-anion, and Sq cation-anion
+
+../Sq_Average_FFT_source/main_structure nvt_298K.gro traj.gro charges_total 'BMIM' 'BF4' > Sq_partial.out
