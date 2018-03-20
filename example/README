@@ -1,3 +1,0 @@
-here we've cut the trajector down to two frames to save space.  Run code with command
-
-./main_structure nvt_298K.gro traj.gro charges_total 'BMIM' 'BF4' > Sq_partial.out

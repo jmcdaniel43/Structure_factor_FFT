@@ -1,3 +1,0 @@
-This code computes equilibrium structure factors that are averaged over a trajectory.
-It does not compute correlation functions, e.g. S(q,t), for which the code in directory
-../Sq_Ct_FFT should be used
