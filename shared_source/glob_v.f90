@@ -21,6 +21,9 @@ module global_variables
    !*** this is for computing total charge density
    real*8, dimension(:), allocatable :: charges
 
+   !*** this is for number density
+   real*8, dimension(:), allocatable :: atomic_number
+
    !************* q grid for output structure factor
    real*8,parameter :: q_space=0.001
 
@@ -30,20 +33,16 @@ module global_variables
    integer,parameter :: spline_order=6
    integer, parameter :: spline_grid = 100000
    real*8,dimension(spline_grid) :: B6_spline, B5_spline, B4_spline, B3_spline 
-   real*8,dimension(:,:,:) , allocatable :: Q_grid
-   complex*16,dimension(:,:,:) , allocatable :: SQ, B
+   complex*16,dimension(:,:,:) , allocatable :: B
 
-   ! for saving Sq trajectory for correlation functions
-   complex*16, dimension(:,:,:), allocatable  :: SQt
-   real*8 ,  dimension(:,:,:), allocatable  :: SQ_Ct
    ! this array contains the corresponding wavevector magnitude
-   ! for index i_index in SQt(i_index,:,:)
+   ! for index i_index in Sqt_a(i_index,:,:)
    real*8 , dimension(:), allocatable :: kmag_1D
    ! this stores all the kmag values from all vectors
    real*8 , dimension(:), allocatable :: kmag_1Dall
-    ! this is not the most efficient way of doing mapping, but it works.  Each
-    ! array element stores integer index
-   integer, dimension(pme_grid,pme_grid,pme_grid) :: SQt_map_index
+   ! this is not the most efficient way of doing mapping, but it works.  Each
+   ! array element stores integer index
+   integer, dimension(pme_grid,pme_grid,pme_grid) :: SQq_map_index
    integer, dimension(3)  :: max_index_list
 
 

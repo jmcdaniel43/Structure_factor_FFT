@@ -5,6 +5,8 @@ contains
   !*******************************
   ! this subroutine computes either number density or charge density structure factors
   ! based on the input and parameter settings.
+  ! PME routines are setup to return both number density Qn, and charge density Qc,
+  ! interpolated grids to save time.  We may or may not be using both
   ! structure factors will be returned in 3D , S(qvec), which is the most
   ! general data for non isotropic systems
   !*******************************
@@ -17,8 +19,8 @@ contains
     TYPE(DFTI_DESCRIPTOR), pointer,intent(in):: dfti_desc,dfti_desc_inv
     character(*), intent(in) :: traj_file
 
-    complex*16,dimension(:,:,:),allocatable::FQ
-    real*8, dimension(:,:,:),allocatable :: SQ2
+    complex*16,dimension(:,:,:),allocatable::FQ, SQ
+    real*8, dimension(:,:,:),allocatable :: Qn, Qc, SQ2
     real*8, dimension(:,:,:,:,:),allocatable :: SQ2_store
     complex*16, dimension(:,:,:,:),allocatable :: SQ_store
     real*8,dimension(:), allocatable::q_1r
@@ -34,8 +36,9 @@ contains
     ! here we average wavevectors as these change slightly during NPT
     kk_avg=0d0    
 
-    allocate( FQ(pme_grid,pme_grid,pme_grid), SQ2(pme_grid,pme_grid,pme_grid), q_1r(pme_grid**3), q_1d(pme_grid**3) )
+    allocate( Qn(pme_grid,pme_grid,pme_grid),Qc(pme_grid,pme_grid,pme_grid),FQ(pme_grid,pme_grid,pme_grid),SQ(pme_grid,pme_grid,pme_grid),SQ2(pme_grid,pme_grid,pme_grid), q_1r(pme_grid**3), q_1d(pme_grid**3) )
     SQ2=0d0
+
 
     ! we need these arrays if doing a full scattering structure factor and also
     ! if doing an electron density structure factor.  The only time we don't
@@ -74,14 +77,15 @@ contains
              ! charge_iontype stores charges for atoms in xyz_scale array,
              ! with corresponding indices
              call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K, charge_iontype)
-             call grid_Q(Q_grid,xyz_scale,n_atom_kind,K,n, charge_iontype)
-             q_1r=RESHAPE(Q_grid, (/K**3/) )
+             ! returns both Qn number density and Qc charge density grids.
+             ! here, we are only using Qc
+             call grid_Q(Qn,Qc,xyz_scale,n_atom_kind,K,n, charge_iontype)
+             q_1r=RESHAPE(Qc, (/K**3/) )
              q_1d=cmplx(q_1r,0.,16)
              status=DftiComputeForward(dfti_desc, q_1d)
              FQ=RESHAPE(q_1d, (/K,K,K/) )
              ! structure factor = B * FQ
-             SQ = FQ*B
-             SQ_store(i_type,:,:,:) = SQ(:,:,:)
+             SQ_store(i_type,:,:,:) = FQ*B
           enddo
 
           ! now create all the cross SQ2 structure factors for this snapshot
@@ -96,14 +100,15 @@ contains
              do i_type = 1 , n_atom_type
                 ! note this only creates coordinates for atomtype "i_type"
                 call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K)
-                call grid_Q(Q_grid,xyz_scale,n_atom_kind,K,n)
-                q_1r=RESHAPE(Q_grid, (/K**3/) )
+                ! returns both Qn number density and Qc charge density grids.
+                ! here, we are only using Qn
+                call grid_Q(Qn,Qc,xyz_scale,n_atom_kind,K,n)
+                q_1r=RESHAPE(Qn, (/K**3/) )
                 q_1d=cmplx(q_1r,0.,16)
                 status=DftiComputeForward(dfti_desc, q_1d)
                 FQ=RESHAPE(q_1d, (/K,K,K/) )
                 ! structure factor = B * FQ
-                SQ = FQ*B
-                SQ_store(i_type,:,:,:) = SQ(:,:,:)
+                SQ_store(i_type,:,:,:) = FQ*B
              enddo
 
              ! now create all the cross SQ2 structure factors for this snapshot
@@ -113,8 +118,10 @@ contains
              !********************* computing partial structure factor
              i_type = partial_structure_factor_index
              call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K)
-             call grid_Q(Q_grid,xyz_scale,n_atom_kind,K,n)
-             q_1r=RESHAPE(Q_grid, (/K**3/) )
+             ! returns both Qn number density and Qc charge density grids.
+             ! here, we are only using Qn
+             call grid_Q(Qn,Qc,xyz_scale,n_atom_kind,K,n)
+             q_1r=RESHAPE(Qn, (/K**3/) )
              q_1d=cmplx(q_1r,0.,16)
              status=DftiComputeForward(dfti_desc, q_1d)
              FQ=RESHAPE(q_1d, (/K,K,K/) )
@@ -302,7 +309,11 @@ contains
 !!$       stop
     !   else
     index = ceiling( q_mag / dq_form )
-    if ( index < max_q_form ) then
+    ! could be 0 if q_mag is zero.  We don't care about scattering at k=0
+    ! anyway, so might as well set to zero
+    if (index == 0 ) then
+       get_form_fac = 0d0
+    elseif ( index < max_q_form ) then
        get_form_fac = atomtype_form( i_index, index )
     else
        get_form_fac = 0d0

@@ -24,7 +24,7 @@ contains
     integer:: i, length(3), status
 
     ! allocate arrays
-    allocate(B(pme_grid,pme_grid,pme_grid),Q_grid(pme_grid,pme_grid,pme_grid),SQ(pme_grid,pme_grid,pme_grid))
+    allocate(B(pme_grid,pme_grid,pme_grid))
 
     ! set up fourier transform descriptors
     length=pme_grid
@@ -61,26 +61,34 @@ contains
 
   !*****************************************************************
   ! This subroutine interpolates charges onto Q grid to be used in pme reciprocal space
-  ! routines
+  ! routines. 
+  !
+  ! Qn grid is used to grid number density for Sn(q), and Qc grid is used to grid
+  ! charge density for Sc(q).
+  !
+  ! If 'charge_iontype' is present,
+  ! then we are creating two Qgrids, one with charge density, and
+  ! one with electron number density (X-ray structure)
   !*****************************************************************
-  subroutine grid_Q(Q, xyz,n_atom,K,n,charge_iontype)
+  subroutine grid_Q(Qn,Qc, xyz,n_atom,K,n,charge_iontype)
     use global_variables
     use omp_lib
     integer, intent(in) :: n_atom
     real*8, intent(in), dimension(:,:) :: xyz
     integer,intent(in)::K,n
     real*8,dimension(:),intent(in),optional::charge_iontype
-    real*8,dimension(:,:,:),intent(out)::Q
+    real*8,dimension(:,:,:),intent(out)::Qn,Qc
     integer::i,j,k1,k2,k3,n1,n2,n3,nn1,nn2,nn3,nearpt(3),splindex(3)
-    real*8::sum
+    real*8::sum1,sum2
     real*8,dimension(3)::u,arg
 
 
-    Q=0D0
-
+    Qn=0D0
+    Qc=0d0
+ 
     ! parameter spline_grid undeclared, but ok
     call OMP_SET_NUM_THREADS(n_threads)
-    !$OMP PARALLEL DEFAULT(PRIVATE) SHARED(n_atom,xyz,charge_iontype,n,B6_spline,B4_spline,K) REDUCTION(+:Q)
+    !$OMP PARALLEL DEFAULT(PRIVATE) SHARED(n_atom,xyz,charge_iontype,atomic_number,n,B6_spline,B4_spline,K) REDUCTION(+:Qn,Qc)
     !$OMP DO SCHEDULE(dynamic, n_threads)
     !$
     do j=1,n_atom
@@ -109,29 +117,41 @@ contains
                    n3=n3+K
                 endif
 
-                sum=0d0
+                sum1=0d0
+                sum2=0d0
                 splindex = ceiling(arg/6.D0*dble(spline_grid))
-
                
                 ! note 0<arg<n , so arg should always be within bounds of gridded spline
                 ! use Case statement to see if we want total charge density
                 if(spline_order .eq.6) then
                    Select Case(Charge_density_Sq)
                    Case('yes')
-                       sum=charge_iontype(j)*B6_spline(splindex(1))*B6_spline(splindex(2))*B6_spline(splindex(3))
+                       ! number density (sum1) and total charge (sum2) structure factors
+                       ! Qn, we multiply by atomic_number, as we are using a
+                       ! general approximation for atomic form factors to save time
+                       sum1=atomic_number(j)*B6_spline(splindex(1))*B6_spline(splindex(2))*B6_spline(splindex(3))
+                       sum2=charge_iontype(j)*B6_spline(splindex(1))*B6_spline(splindex(2))*B6_spline(splindex(3))
                    Case default
-                       sum=B6_spline(splindex(1))*B6_spline(splindex(2))*B6_spline(splindex(3))
+                       ! we will mutiply S(q) by form factor F(q), so we don't multiply by atomic_number here
+                       sum1=B6_spline(splindex(1))*B6_spline(splindex(2))*B6_spline(splindex(3))
                    End Select
                 else
                    Select Case(Charge_density_Sq)
                    Case('yes')
-                       sum=charge_iontype(j)*B4_spline(splindex(1))*B4_spline(splindex(2))*B4_spline(splindex(3))   
+                       ! number density (sum1) and total charge (sum2) structure factors
+                       ! Qn, we multiply by atomic_number, as we are using a
+                       ! general approximation for atomic form factors to save time
+                       sum1=atomic_number(j)*B4_spline(splindex(1))*B4_spline(splindex(2))*B4_spline(splindex(3))   
+                       sum2=charge_iontype(j)*B4_spline(splindex(1))*B4_spline(splindex(2))*B4_spline(splindex(3))
                    Case default
-                       sum=B4_spline(splindex(1))*B4_spline(splindex(2))*B4_spline(splindex(3))
+                       ! we will mutiply S(q) by form factor F(q), so we don't multiply by atomic_number here
+                       sum1=B4_spline(splindex(1))*B4_spline(splindex(2))*B4_spline(splindex(3))
                    End Select
                 endif
 
-                Q(n1+1,n2+1,n3+1)=Q(n1+1,n2+1,n3+1)+sum
+                Qn(n1+1,n2+1,n3+1)=Qn(n1+1,n2+1,n3+1)+sum1
+                Qc(n1+1,n2+1,n3+1)=Qc(n1+1,n2+1,n3+1)+sum2
+
              enddo
           enddo
        enddo

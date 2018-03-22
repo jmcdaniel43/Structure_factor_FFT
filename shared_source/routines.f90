@@ -76,6 +76,13 @@ contains
     open( ifile, file=ifn, status='old' )
     read( ifile, * ) line
     read( ifile, '(I)' ) n_atom
+
+    ! allocate atomic_number array if needed. this is global variable
+    Select Case(Charge_density_Sq)
+    Case('yes')
+        allocate(atomic_number(n_atom))
+    end Select
+
     do i_atom = 1 , n_atom
        if ( i_atom > MAX_N_ATOM ) then
           stop " please increase setting of MAX_N_ATOM"
@@ -92,6 +99,8 @@ contains
           call match_ion_type( mname , ion_type )
           atom_index( i_atom ) = ion_type
           n_atom_type = 2  ! either a cation atom, or anion atom
+          call trim_head( aname )
+          call fill_atomic_number( i_atom, aname )
        End Select
        ! convert nm to angstoms
        xyz(i_atom,:) = xyz(i_atom,:) * 10d0
@@ -413,6 +422,50 @@ contains
 
 
   end subroutine get_atomic_form_factor
+
+
+  !****************************************
+  ! this subroutine fills in atomic numbers to be
+  ! used in number structure factor calculation
+  ! this is based on atom name in gromacs, so 
+  ! it's imperfect, as atom names don't always reflect elements...
+  !****************************************
+  subroutine fill_atomic_number( i_atom, aname )
+    use global_variables
+    integer, intent(in) :: i_atom
+    character(*), intent(in) :: aname    
+
+    ! guess element based on atom name
+    ! two letter dictionaries first...
+    if ( ( aname(1:2) .eq. "Sh" ) .or. ( aname(1:2) .eq. "SH" ) ) then
+       atomic_number(i_atom) = 0.0  ! drude oscillator
+    elseif ( ( aname(1:2) .eq. "Cl" ) .or. ( aname(1:2) .eq. "CL" ) ) then
+       atomic_number(i_atom) = 17.0
+    elseif ( ( aname(1:2) .eq. "Na" ) .or. ( aname(1:2) .eq. "NA" ) ) then
+       atomic_number(i_atom) = 11.0
+    ! now one letter if couldn't match two letters
+    elseif ( aname(1:1) .eq. "S" ) then
+       atomic_number(i_atom) = 16.0
+    elseif ( aname(1:1) .eq. "P" ) then
+       atomic_number(i_atom) = 15.0
+    elseif ( aname(1:1) .eq. "F" ) then
+       atomic_number(i_atom) = 9.0
+    elseif ( aname(1:1) .eq. "O" ) then
+       atomic_number(i_atom) = 8.0
+    elseif ( aname(1:1) .eq. "N" ) then
+       atomic_number(i_atom) = 7.0
+    elseif ( aname(1:1) .eq. "C" ) then
+       atomic_number(i_atom) = 6.0
+    elseif ( aname(1:1) .eq. "B" ) then
+       atomic_number(i_atom) = 5.0
+    elseif ( aname(1:1) .eq. "H" ) then
+       atomic_number(i_atom) = 1.0
+    else
+       write(*,*) "can't determine element for atomtype ", aname
+       stop
+    endif
+
+  end subroutine fill_atomic_number
 
 
 

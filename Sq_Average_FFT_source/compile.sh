@@ -14,9 +14,9 @@ MKLLIB=/usr/local/pacerepov1/intel/mkl/10.0.5.25/lib/em64t/
 
 include="../shared_source/"
 
-#OPT="-openmp -static -check bounds -check uninit -check format -warn declarations -traceback"  #-warn unused 
+OPT="-openmp -static -check bounds -check uninit -check format -warn declarations -traceback"  #-warn unused 
 
-OPT="-openmp -static"
+#OPT="-openmp -static"
 
 ifort $OPT -c ${include}glob_v.f90 ${include}routines.f90 ${include}pme.f90 structure_factor.f90 ${include}main_structure.f90  -I$MKLLIB -I$OMPINCLUDE -I${include}mkl_modules
 ifort $OPT *.o -L$MKLLIB -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -L$OMPINCLUDE -lompi_dbg_msgq -o main_structure

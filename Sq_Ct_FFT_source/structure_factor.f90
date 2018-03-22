@@ -6,21 +6,25 @@ contains
   !  This computes both number density and charge density structure factors,
   !  and correlation functions thereof, e.g. S(q,t)
   !  Because many things are computed, there are many similar
-  !  datastructures that could create confusion.
-  !  Here we outline the data structures
+  !  datastructures.  Our notation for structure factor data structures
+  !  is as follows:
   ! 
-  !  SQ(:,:,:) is a structure factor for a specific snapshot, for a specific
-  !  atom type (cations, anions, other atom type, etc.)
-  ! 
-  !  SQ_store(:,:,:,:) stores the structure factors for all atomtypes
-  !  e.g. SQ_store(i_type,:,:,:), for a snapshot
+  !  1) "Q" denotes vector, "q" denotes scalar, e.g. q=|Q|
+  !     thus SQ(Q1,Q2,Q3)(at least 3D array), and Sq(q)
+  !    
+  !  2) "_a" denotes atom type (or ion type dependence) so a structure factor
+  !     that depends on two ion types could be called SQ_a_b, or if we've 
+  !     condensed the indices into one array, SQ_ab
   !
-  !  SQ2_store keeps a running sum of atomtype-atomtype scattering structure
-  !  factors throughout the trajectory, e.g. SQ_store(i_type,j_type,:,:,:) +=
-  !  SQ_store(i_type,:,:,:) *complexconjugate SQ_store(j_type,:,:,:)
+  !  3) dynamic structure factor is labeled with "t", such as Sqt. The
+  !     associated correlation function of this quantity is labeled with "Ct",
+  !     such as SqCt
   !
-  !  SQt stores Structure factor trajectory for select wavevectors,
-  !  see Sq_TCF subroutine (this array is stored as global variable)
+  !  4) we compute both total charge structure factors, and electron number
+  !     density structure factors.  The former is denoted with "c", the later
+  !     with "n", so e.g. SQc, SQn
+  !     this additionally applies to all other data structures used to compute
+  !     structure factor, for example q_1rc , q_1dn 
   !*******************************
   subroutine generate_structure_factor( n_atom, dfti_desc,dfti_desc_inv, traj_file )
     use global_variables
@@ -31,42 +35,69 @@ contains
     TYPE(DFTI_DESCRIPTOR), pointer,intent(in):: dfti_desc,dfti_desc_inv
     character(*), intent(in)  :: traj_file
 
-    complex*16,dimension(:,:,:),allocatable::FQ
-    real*8, dimension(:,:,:),allocatable :: SQ2, SQ_Ct_avg
-    real*8, dimension(:,:,:,:,:),allocatable :: SQ2_store
-    real*8, dimension(:,:,:), allocatable    :: SQ2_avg
-    complex*16, dimension(:,:,:,:),allocatable :: SQ_store
-    real*8,dimension(:), allocatable::q_1r, kmag_1D_avg, kmag_1Dall_avg
-    complex*16,dimension(:), allocatable::q_1d
+    complex*16,dimension(:,:,:),allocatable::FQc, FQn
+    real*8, dimension(:,:,:),allocatable :: SqCtc_avg, SqCtn_avg
+    real*8, dimension(:,:,:,:,:),allocatable :: SQQc_a_b, SQQn_a_b  ! fortran not case sensitive QQ and q2
+    real*8, dimension(:,:,:), allocatable    :: Sq2c_a_b, Sq2n_a_b  ! denote same thing but distinct fortran names
+    complex*16, dimension(:,:,:,:),allocatable :: SQc_a, SQn_a
+    ! time dependent Sq
+    complex*16, dimension(:,:,:), allocatable  :: Sqtc_a, Sqtn_a
+    ! correlation functions S(q,t)
+    real*8 ,  dimension(:,:,:), allocatable  :: SqCtc_aa, SqCtn_aa
+    ! Qgrids
+    real*8, dimension(:,:,:), allocatable      :: Qc_grid, Qn_grid
+    real*8,dimension(:), allocatable:: kmag_1D_avg, kmag_1Dall_avg
+    real*8,dimension(:), allocatable:: q_1rc, q_1rn
+    complex*16,dimension(:), allocatable::q_1dc, q_1dn
     real*8,dimension(3,3) :: kk, kk_avg, box
     integer :: n, K
     real*8,dimension(:), allocatable :: charge_iontype
     real*8,dimension(:,:),allocatable :: xyz, xyz_scale
     integer :: n_atom_kind, nkmag, nkmag_all, i_type, status, n_traj, nmax_tcf, i_step, ifile=99, i_atom
 
+    ! note in this code we have disabled the use of Charge_density_Sq tag.  It
+    ! should always be set to 'yes'
+    Select Case(Charge_density_Sq)
+    Case('yes')
+       continue
+    case default
+       write(*,*) "must have Charge_density_Sq='yes'. Please change setting in glob_v.f90 "
+       stop
+    End Select
+
+    ! Here we approximate the q-dependence of the atomic form factors using in
+    ! the number density scattering structure factor (X-ray) .  This is because
+    ! if we were using rigorously elemental form factors, we would have to
+    ! compute partial structure factors for all elements individually.
+    ! for short wavevectors ( < 1-2 inverse angtroms ), it is a good
+    ! approximation to assume that fi(q) = qi * G(q), where G(q) is an
+    ! element-independent function.  This is what we do here....
+    write(*,*) "Using approximate functional form for elemental form factors"
+    write(*,*) "this should provide a good approximation for small wavevectors,"
+    write(*,*) "e.g. < 1-2 inverse angstroms.  See code for details..."
+
     n=spline_order
     K=pme_grid
     ! here we average wavevectors as these change slightly during NPT
     kk_avg=0d0    
+ 
+    allocate( Qc_grid(pme_grid,pme_grid,pme_grid), Qn_grid(pme_grid,pme_grid,pme_grid) )
+    allocate( FQc(pme_grid,pme_grid,pme_grid), q_1rc(pme_grid**3), q_1dc(pme_grid**3) )
+    allocate( FQn(pme_grid,pme_grid,pme_grid), q_1rn(pme_grid**3), q_1dn(pme_grid**3) )
 
-    allocate( FQ(pme_grid,pme_grid,pme_grid), SQ2(pme_grid,pme_grid,pme_grid), q_1r(pme_grid**3), q_1d(pme_grid**3) )
-    SQ2=0d0
+    ! structure factor data structures
+    allocate(  SQc_a(n_atom_type,pme_grid,pme_grid,pme_grid), SQQc_a_b(n_atom_type,n_atom_type,pme_grid,pme_grid,pme_grid) )
+    allocate(  SQn_a(n_atom_type,pme_grid,pme_grid,pme_grid), SQQn_a_b(n_atom_type,n_atom_type,pme_grid,pme_grid,pme_grid) )
+    allocate(  Sq2c_a_b(pme_grid*pme_grid*pme_grid,n_atom_type,n_atom_type), Sq2n_a_b(pme_grid*pme_grid*pme_grid,n_atom_type,n_atom_type) )   
 
-    ! we need these arrays if doing a full scattering structure factor and also
-    ! if doing an electron density structure factor.  The only time we don't
-    ! need the arrays is a partial structure factors, so might as well allocate
-    ! them no matter what
-    allocate(  SQ_store(n_atom_type,pme_grid,pme_grid,pme_grid), SQ2_store(n_atom_type,n_atom_type,pme_grid,pme_grid,pme_grid) )
-    SQ_store=0d0
-    SQ2_store=0d0
+    SQc_a=0d0;SQn_a=0d0;
+    SQQc_a_b=0d0;SQQn_a_b=0d0;
 
     allocate( kmag_1Dall(pme_grid*pme_grid*pme_grid) )
-    ! this will store the radial average over wavevectors of SQ2_store
-    allocate(  SQ2_avg(pme_grid*pme_grid*pme_grid,n_atom_type,n_atom_type) )
-
 
     ! get number of trajectory snapshots
     call get_n_trajectories( n_traj, n_atom, traj_file )
+
     ! open trajectory file, so as we read it in on the fly
     open( ifile, file=traj_file, status='old' )
 
@@ -84,96 +115,47 @@ contains
        kk_avg = kk_avg + kk
 
        if ( i_step == 1 ) then
-          ! initialize Sq_TCF with initial kvectors, n_traj
-          call Sq_TCF_store( i_step, SQ_store, kk, n_traj )
+          ! initialize Sqt, TCF datastructures
+          call Sqt_initialize_datastructures(SqCtc_aa, SqCtn_aa, Sqtc_a, Sqtn_a, n_traj, kk )
        end if
 
-       !*************** Decide whether we're doing total charge structure factor
-       ! or X-ray scattering, electron density structure factor
-       Select Case(Charge_density_Sq)
-       Case('yes')
           do i_type = 1 , n_atom_type  ! n_atom_type=2, cation atoms=1, anion atoms=2
 
              ! note this only creates coordinates for atomtype "i_type"
              ! charge_iontype stores charges for atoms in xyz_scale array,
              ! with corresponding indices
              call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K, charge_iontype)
-             call grid_Q(Q_grid,xyz_scale,n_atom_kind,K,n, charge_iontype)
-             q_1r=RESHAPE(Q_grid, (/K**3/) )
-             q_1d=cmplx(q_1r,0.,16)
-             status=DftiComputeForward(dfti_desc, q_1d)
-             FQ=RESHAPE(q_1d, (/K,K,K/) )
+             ! two different Q_grids, one for electron number density, Qn_grid
+             ! one for total charge density, Qc_grid
+             call grid_Q(Qn_grid,Qc_grid,xyz_scale,n_atom_kind,K,n,charge_iontype)
+             q_1rn=RESHAPE(Qn_grid, (/K**3/) )
+             q_1rc=RESHAPE(Qc_grid, (/K**3/) )
+             q_1dn=cmplx(q_1rn,0.,16)
+             q_1dc=cmplx(q_1rc,0.,16)
+             status=DftiComputeForward(dfti_desc, q_1dn)
+             status=DftiComputeForward(dfti_desc, q_1dc)
+             FQn=RESHAPE(q_1dn, (/K,K,K/) )
+             FQc=RESHAPE(q_1dc, (/K,K,K/) )
              ! structure factor = B * FQ
-             SQ = FQ*B
-             SQ_store(i_type,:,:,:) = SQ(:,:,:)
+             SQn_a(i_type,:,:,:) = FQn*B
+             SQc_a(i_type,:,:,:) = FQc*B
           enddo
 
           ! now create all the cross SQ2 structure factors for this snapshot
-          call combine_partial_structure_factors( SQ2_store , SQ_store )
+          call combine_partial_structure_factors( SQQn_a_b , SQn_a )
+          call combine_partial_structure_factors( SQQc_a_b , SQc_a )
 
-       Case default
-
-          Select Case(partial_structure_factor)
-          Case("no")
-             !****************** computing full structure factor
-             ! loop over  atom types for structure factor
-             do i_type = 1 , n_atom_type
-                ! note this only creates coordinates for atomtype "i_type"
-                call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K)
-                call grid_Q(Q_grid,xyz_scale,n_atom_kind,K,n)
-                q_1r=RESHAPE(Q_grid, (/K**3/) )
-                q_1d=cmplx(q_1r,0.,16)
-                status=DftiComputeForward(dfti_desc, q_1d)
-                FQ=RESHAPE(q_1d, (/K,K,K/) )
-                ! structure factor = B * FQ
-                SQ = FQ*B
-                SQ_store(i_type,:,:,:) = SQ(:,:,:)
-             enddo
-
-             ! now create all the cross SQ2 structure factors for this snapshot
-             call combine_partial_structure_factors( SQ2_store , SQ_store )
-
-          Case("yes")
-             !********************* computing partial structure factor
-             i_type = partial_structure_factor_index
-             call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K)
-             call grid_Q(Q_grid,xyz_scale,n_atom_kind,K,n)
-             q_1r=RESHAPE(Q_grid, (/K**3/) )
-             q_1d=cmplx(q_1r,0.,16)
-             status=DftiComputeForward(dfti_desc, q_1d)
-             FQ=RESHAPE(q_1d, (/K,K,K/) )
-             ! structure factor = B * FQ
-             SQ = FQ*B
-             SQ2 = SQ2 + dble(SQ)**2+aimag(SQ)**2
-          End Select
-
-
-       End Select
 
        write(*,*) "i_step", i_step
-       ! save SQ_store at this snapshot to compute TCF
-       call Sq_TCF_store( i_step, SQ_store, kk )
+       ! save SQc_a, SQn_a for desired kmag wavevectors
+       call Sq_TCF_store( i_step, Sqtn_a, SQn_a )
+       call Sq_TCF_store( i_step, Sqtc_a, SQc_a )
 
     enddo
 
-
-    Select Case(Charge_density_Sq)
-    Case('yes')
        kk_avg = kk_avg / dble(n_traj)
-       SQ2_store = SQ2_store / n_traj
-    Case('no')
-       ! now average
-       Select Case(partial_structure_factor)
-       Case("no")
-          kk_avg = kk_avg / dble(n_traj)
-          SQ2_store = SQ2_store / n_traj
-          ! now add partial structure factors
-          call add_partial_structure_factors( SQ2 , SQ2_store, kk )
-       Case("yes")
-          kk_avg = kk_avg / dble(n_traj)
-          SQ2 = SQ2 / n_traj
-       end Select
-    End Select
+       SQQn_a_b = SQQn_a_b / dble(n_traj)
+       SQQc_a_b = SQQc_a_b / dble(n_traj)
 
     ! NPT, calculate average reciprocal lattice vectors
     write(*,*) " average reciprocal lattice_vectors"
@@ -181,98 +163,91 @@ contains
     write(*,*) kk_avg(2,:)
     write(*,*) kk_avg(3,:)
 
-
-    ! compute correlation functions
-    call Sq_TCF_compute( nmax_tcf, kk_avg  )
+    ! compute correlation functions for both number and charge
+    ! structure factors
+    call Sq_TCF_compute( nmax_tcf, kk_avg, SqCtn_aa, Sqtn_a  )
+    call Sq_TCF_compute( nmax_tcf, kk_avg, SqCtc_aa, Sqtc_a  )
 
     ! average over 3D wavectors to get 1D SQ
-    allocate( SQ_Ct_avg(size(SQ_Ct(:,1,1)),size(SQ_Ct(1,:,1)),size(SQ_Ct(1,1,:)) ), kmag_1D_avg(size(kmag_1D)) )
+    allocate( SqCtc_avg(size(SqCtc_aa(:,1,1)),size(SqCtc_aa(1,:,1)),size(SQCtc_aa(1,1,:)) ), SqCtn_avg(size(SqCtn_aa(:,1,1)),size(SqCtn_aa(1,:,1)),size(SQCtn_aa(1,1,:)) )  )
+    allocate( kmag_1D_avg(size(kmag_1D)) )
+
     ! we need to copy kmag_1D, because we sort it twice.  No reason for this
     ! except different data structures
     allocate(  kmag_1Dall_avg(size(kmag_1Dall)) )
-    call Sq_collapse_1D( nkmag, SQ_Ct_avg , SQ_Ct , kmag_1D_avg, kmag_1D, q_space )
-    call Sq_collapse_SQ2( nkmag_all, SQ2_avg , SQ2_store , kmag_1Dall_avg , kmag_1Dall , q_space )
+
+    call Sq_collapse_1D( nkmag, SqCtn_avg , SqCtn_aa , kmag_1D_avg, kmag_1D, q_space )
+    call Sq_collapse_1D( nkmag, SqCtc_avg , SqCtc_aa , kmag_1D_avg, kmag_1D, q_space )
+
+    call Sq_collapse_SQ2( nkmag_all, Sq2n_a_b , SQQn_a_b , kmag_1Dall_avg , kmag_1Dall , q_space )
+    call Sq_collapse_SQ2( nkmag_all, Sq2c_a_b , SQQc_a_b , kmag_1Dall_avg , kmag_1Dall , q_space )
 
     ! now print, note because we took the FT in reduced coordinates, we need to
     ! convert to the physical wavevectors
-    Select Case(Charge_density_Sq)
-    Case('yes')
-       call Sq_TCF_print( SQ2_avg, kmag_1Dall_avg , nkmag_all, SQ_Ct_avg, kmag_1D_avg, nmax_tcf, nkmag  )
-    case default 
-       write(*,*) " k vec ,  SQ^2 "
-       call print_SQ( SQ2 , kk_avg, pme_max_print )
-    End Select
+   
+    ! print number density S(q)'s, output files will be labeled with suffix='n' 
+    call Sq_TCF_print( Sq2n_a_b, kmag_1Dall_avg , nkmag_all, SqCtn_avg, kmag_1D_avg, nmax_tcf, nkmag, "n"  )
+    ! print charge density S(q)'s, output files will be labeled with suffix='c'
+    call Sq_TCF_print( Sq2c_a_b, kmag_1Dall_avg , nkmag_all, SqCtc_avg, kmag_1D_avg, nmax_tcf, nkmag, "c"  )
 
-    deallocate( FQ, SQ2, q_1r, q_1d )
 
-    Select Case(partial_structure_factor)
-    Case("no")
-       deallocate( SQ_store, SQ2_store)
-    End Select
+    deallocate( Qc_grid, Qn_grid, FQc, FQn, q_1rc, q_1rn, q_1dc, q_1dn, SQc_a, SQn_a, SQQc_a_b, SQQn_a_b, Sq2c_a_b, Sq2n_a_b, SqCtc_aa, SqCtn_aa, Sqtc_a, Sqtn_a, SqCtc_avg, SqCtn_avg )
 
     close( ifile )
 
   end subroutine generate_structure_factor
 
 
+  !*********************************
+  ! this function gives the approximate form-factor
+  ! dependence on q.  We assume this functional form
+  ! is element-independent, which is not true, but is
+  ! a fairly good approximation for small q < 1-2 inverse angstrom
+  ! this approximation saves a ton of computer time, as it means
+  ! we don't have to compute partial-structure factors as the
+  ! Fi(q) dependence of the form factor comes out of the sum over
+  ! atomtypes.  We use a functional form of
+  ! F(q) = Atomic_number * exp(-a0 *q**a1 ).  We have determined
+  ! a0 and a1 from fits to the form factor for carbon.  Thes parameters are:
+  !             a0=0.01 nm^(a1) and a1=1.42.
+  !            note we have a conversion below for angstroms
+  ! we have verified that these parameters
+  ! are also reasonable for oxygen and hydrogen
+  real*8 function form_factor_approx( kmag )
+       real*8, intent(in) :: kmag
+       real*8  :: arg
+       real*8, parameter :: a0=0.01 , a1=1.42  ! nm units
+   ! kmag is in inverse angstroms, so make sure to convert
+   ! also, don't need Atomic number prefactor, as this was
+   ! included in the Qgrid and Fourier transform
+   arg = kmag * 10d0  ! convert angstrom^-1 to nm^-1
 
-  subroutine add_partial_structure_factors( SQ2 , SQ2_store,kk )
-    use global_variables
-    real*8,dimension(:,:,:), intent(out) :: SQ2
-    real*8,dimension(:,:,:,:,:), intent(in) :: SQ2_store
-    real*8,dimension(3,3) , intent(in) :: kk
+   form_factor_approx = exp(-a0*arg**a1)
 
-    integer :: i_type, j_type, i_k, j_k, l_k
-    real*8  :: fi, fj, k_vec(3), k_mag
-
-    SQ2=0d0
-
-    ! here we add only those structure factors that will be printed, to save time
-    do l_k = 1, pme_max_print
-       do j_k = 1, pme_max_print
-          do i_k = 1, pme_max_print
-
-             ! convert wavevector, note the reciprocal lattice vectors kk don't have the 2*pi factor
-             k_vec(:) = 2 * pi * ( dble(i_k-1) * kk(1,:) +  dble(j_k-1) * kk(2,:) +  dble(l_k-1) * kk(3,:)  )
-             k_mag = sqrt(dot_product(k_vec,k_vec))
-
-             do i_type=1,n_atom_type
-                do j_type = i_type, n_atom_type
-
-                   fi = get_form_fac( i_type, k_mag )
-                   fj = get_form_fac( j_type, k_mag )
-
-                   SQ2(i_k,j_k,l_k) = SQ2(i_k,j_k,l_k) + fi * fj * SQ2_store(i_type,j_type,i_k,j_k,l_k)
-		enddo
-             enddo
-          enddo
-       enddo
-    enddo
-
-  end subroutine add_partial_structure_factors
+  end function form_factor_approx
 
 
   !*********************************
-  ! this subroutine stores structure factors during the course of the simulation
-  ! and finally computes correlation functions of these quantities
+  ! this subroutine initializes data structures required to
+  ! map from 3D vector arrays "SQ" to 1D vector arrays "Sq"
+  ! it also initializes the time dependent structure factor
+  ! data arrays
   !
-  ! when we initialize, we construct the array kmag_1D which provides
+  ! we also construct the array kmag_1D which provides
   ! the magnitude of the wavevector mapped to index  i_index in
-  ! SQt(i_index,i_type,i_step)
+  ! Sqt(i_index,i_type,i_step)
   !*********************************
-  subroutine Sq_TCF_store( i_step, SQ_store, kk, n_traj )
+  subroutine Sqt_initialize_datastructures(SqCtc_aa, SqCtn_aa, Sqtc_a, Sqtn_a,n_traj, kk )
     use global_variables
-    integer, intent(in) :: i_step
-    complex*16, dimension(:,:,:,:), intent(in) :: SQ_store 
+    complex*16, allocatable, dimension(:,:,:), intent(inout) :: Sqtc_a, Sqtn_a
+    real*8, allocatable, dimension(:,:,:), intent(inout) :: SqCtc_aa, SqCtn_aa
     real*8,dimension(:,:), intent(in) :: kk
-    integer, intent(in), optional     :: n_traj
+    integer, intent(in)               :: n_traj
 
-    integer :: i_k , j_k , l_k, i_index, i_index_tot, i_type, i_t0, i_t1, i_tau, i_max
+    integer :: i_k , j_k , l_k, i_index, i_index_tot, i_type
     real*8, parameter :: k_mag_max = 1.0  ! maximum wavevector for computing correlation function in inverse angstrom
     real*8                 :: k_mag, k_vec(3)
 
-    if ( present(n_traj) ) then
-       write(*,*) "initializing SQt array mapping"
        ! initialize
        max_index_list=0
        i_index=1
@@ -281,8 +256,8 @@ contains
           do j_k=1,pme_grid
              do l_k=1,pme_grid
 
-                ! convert wavevector, note the reciprocal lattice vectors kk don't
-                ! have the 2*pi factor
+                ! convert wavevector, note the reciprocal lattice vectors kk
+                ! don't have the 2*pi factor
                 k_vec(:) = 2 * pi * ( dble(i_k-1) * kk(1,:) +  dble(j_k-1) * kk(2,:) +  dble(l_k-1) * kk(3,:)  )
                 k_mag = sqrt(dot_product(k_vec,k_vec))
 
@@ -292,7 +267,7 @@ contains
 
                 ! see if we're using this wavevector
                 if ( k_mag < k_mag_max ) then
-                   SQt_map_index(i_k,j_k,l_k) = i_index
+                   SQq_map_index(i_k,j_k,l_k) = i_index
                    i_index = i_index + 1
                    if ( i_k > max_index_list(1) ) then
                       max_index_list(1) = i_k
@@ -304,51 +279,51 @@ contains
                       max_index_list(3) = l_k
                    endif
                 else
-                   SQt_map_index(i_k,j_k,l_k) = 0
+                   SQq_map_index(i_k,j_k,l_k) = 0
                 end if
 
              enddo
           enddo
        enddo
 
-       ! now allocate, in Fortran column major, second array dimension is number of
-       ! atom types, should be 2
+       ! now allocate, in Fortran column major, second array dimension is number
+       ! of atom types, should be 2
        i_index = i_index -1
-       write(*,*) "will compute correlation function for  ", i_index, " wavevectors"
-       allocate( SQt(i_index, n_atom_type, n_traj)  )
+       write(*,*) "will compute correlation function for  ", i_index, "wavevectors"
+       allocate( Sqtc_a(i_index, n_atom_type, n_traj), Sqtn_a(i_index, n_atom_type, n_traj)  )
        ! here we assume we are computing correlation function for cation-cation,
        ! anion-anion, and cation-anion, hence three indices
-       allocate( SQ_Ct(i_index, 3, n_traj), kmag_1D(i_index)  )   
+       allocate( SqCtc_aa(i_index, 3, n_traj), SqCtn_aa(i_index, 3, n_traj), kmag_1D(i_index)  )
 
-    else
+  end subroutine  Sqt_initialize_datastructures
+
+  
+
+
+  !*********************************
+  ! this subroutine stores structure factors during the course of the simulation
+  !*********************************
+  subroutine Sq_TCF_store( i_step, Sqt_a, SQ_a )
+    use global_variables
+    integer, intent(in) :: i_step
+    complex*16, dimension(:,:,:), intent(inout) :: Sqt_a
+    complex*16, dimension(:,:,:,:), intent(in) :: SQ_a 
+
+    integer :: i_k , j_k , l_k, i_index, i_type
 
        ! storing Sqt from trajectory
        do i_k=1,max_index_list(1)
           do j_k=1,max_index_list(2)
              do l_k=1,max_index_list(3)
-                i_index =  SQt_map_index(i_k,j_k,l_k)
+                i_index =  SQq_map_index(i_k,j_k,l_k)
                 if ( i_index > 0 ) then
                    do i_type =1, n_atom_type
-                      SQt(i_index,i_type,i_step) =  SQ_store(i_type,i_k,j_k,l_k)
+                      Sqt_a(i_index,i_type,i_step) =  SQ_a(i_type,i_k,j_k,l_k)
                    enddo
                 endif
              enddo
           enddo
        enddo
-
-
-       !  if ( i_step == size(SQt(1,1,:)) ) then
-       !    write(*,*) max_index_list
-       !    i_index =  SQt_map_index(1,1,1)
-       !    do i_k = 1, 2
-       !       write(*,*) SQt(i_index,i_k, i_step)
-       !       write(*,*) SQt(i_index,i_k, i_step-1)
-       !    enddo
-       !   stop
-       !  end if
-
-
-    end if
 
   end subroutine Sq_TCF_store
 
@@ -357,8 +332,10 @@ contains
   ! this subroutine computes correlation functions of the Structure factors
   ! the structure factors are stored in global variables
   !*********************************
-  subroutine Sq_TCF_compute( nmax_tcf, kk_avg  )
+  subroutine Sq_TCF_compute( nmax_tcf, kk_avg, SqCt_aa, Sqt_a  )
     use global_variables
+    complex*16, dimension(:,:,:), intent(inout)  :: Sqt_a
+    real*8 ,  dimension(:,:,:), intent(inout)  :: SqCt_aa
     integer, intent(out) :: nmax_tcf
     real*8,dimension(:,:), intent(in) :: kk_avg
 
@@ -367,12 +344,12 @@ contains
     real*8                 :: k_mag, k_vec(3), SQlocal(4)
 
     ! compute correlation functions
-    i_max = size(SQt(1,1,:))-1
+    i_max = size(Sqt_a(1,1,:))-1
     ! use 1/4 the trajectory size for tau for statistics reasons
     nmax_tcf = i_max/4
 
     allocate(n_avg(i_max))
-    SQ_Ct=0d0
+    SqCt_aa=0d0
     n_avg=0
     do i_t0 = 1, i_max
        ! use 1/4 the trajectory size for tau for statistics reasons
@@ -380,14 +357,14 @@ contains
           i_t1 = i_t0 + i_tau
           if ( i_t1 <= i_max) then
              n_avg(i_tau) = n_avg(i_tau) + 1
-             do i_index=1, size(SQt(:,1,1))
+             do i_index=1, size(Sqt_a(:,1,1))
                 ! cation-cation
-                SQ_Ct(i_index,1,i_tau) = SQ_Ct(i_index,1,i_tau) + 2*dble(SQt(i_index,1,i_t1) * conjg(SQt(i_index,1,i_t0)))
+                SqCt_aa(i_index,1,i_tau) = SqCt_aa(i_index,1,i_tau) + 2*dble(Sqt_a(i_index,1,i_t1) * conjg(Sqt_a(i_index,1,i_t0)))
                 ! anion-anion
-                SQ_Ct(i_index,2,i_tau) = SQ_Ct(i_index,2,i_tau) + 2*dble(SQt(i_index,2,i_t1) * conjg(SQt(i_index,2,i_t0)))
+                SqCt_aa(i_index,2,i_tau) = SqCt_aa(i_index,2,i_tau) + 2*dble(Sqt_a(i_index,2,i_t1) * conjg(Sqt_a(i_index,2,i_t0)))
                 ! cation-anion
-                SQ_Ct(i_index,3,i_tau) = SQ_Ct(i_index,3,i_tau) + dble(SQt(i_index,2,i_t1) * conjg(SQt(i_index,1,i_t0)))
-                SQ_Ct(i_index,3,i_tau) = SQ_Ct(i_index,3,i_tau) + dble(SQt(i_index,1,i_t1) * conjg(SQt(i_index,2,i_t0)))
+                SqCt_aa(i_index,3,i_tau) = SqCt_aa(i_index,3,i_tau) + dble(Sqt_a(i_index,2,i_t1) * conjg(Sqt_a(i_index,1,i_t0)))
+                SqCt_aa(i_index,3,i_tau) = SqCt_aa(i_index,3,i_tau) + dble(Sqt_a(i_index,1,i_t1) * conjg(Sqt_a(i_index,2,i_t0)))
              enddo
           endif
        enddo
@@ -395,7 +372,7 @@ contains
 
     ! now average over trajectory
     do i_tau=1, nmax_tcf
-       SQ_Ct(:,:,i_tau) = SQ_Ct(:,:,i_tau) / dble(n_avg(i_tau))
+       SqCt_aa(:,:,i_tau) = SqCt_aa(:,:,i_tau) / dble(n_avg(i_tau))
     enddo
 
 
@@ -403,7 +380,7 @@ contains
     do i_k=1,max_index_list(1)
        do j_k=1,max_index_list(2)
           do l_k=1,max_index_list(3)
-             i_index =  SQt_map_index(i_k,j_k,l_k)
+             i_index =  SQq_map_index(i_k,j_k,l_k)
              if ( i_index > 0 ) then
                 k_vec(:) = 2 * pi * ( dble(i_k-1) * kk_avg(1,:) +  dble(j_k-1) * kk_avg(2,:) +  dble(l_k-1) * kk_avg(3,:)  )
                 k_mag = sqrt(dot_product(k_vec,k_vec))
@@ -434,15 +411,18 @@ contains
     real*8,dimension(:,:,:), intent(out):: Sq_avg   
     real*8,dimension(:),     intent(out):: kmag_avg
     real*8,dimension(:,:,:), intent(inout) :: Sq_in
-    real*8,dimension(:), intent(inout) :: kmag_in
+    real*8,dimension(:), intent(in) :: kmag_in
     real*8, intent(in)   :: q_space
 
+    real*8, dimension(:), allocatable :: kmag_loc
     integer :: i, j, k, n_avg
     integer :: index_store, index_current, index_local
     real*8  :: kmag_current, kmag_new  
 
+    allocate(kmag_loc(size(kmag_in)) )
+    kmag_loc = kmag_in
     ! first, sort the arrays by wavevector magnitude
-    call Sort(kmag_in, Sq_in) 
+    call Sort(kmag_loc, Sq_in) 
 
     ! now average use q_space resolution, if wavevectors are
     ! closer in magnitude, then average
@@ -450,23 +430,23 @@ contains
 
     index_store=1
     index_current=1
-    do i=1, size(kmag_in)-1
+    do i=1, size(kmag_loc)-1
        ! look for similar kvectors and average
-       if ( index_current >= size(kmag_in)-1 ) exit  ! reached the end
+       if ( index_current >= size(kmag_loc)-1 ) exit  ! reached the end
        n_avg=1
        ! store values for this wavevector, will add to this if averaging
-       kmag_current = kmag_in(index_current)
+       kmag_current = kmag_loc(index_current)
        kmag_avg(index_store) = kmag_current
        Sq_avg(index_store,:,:) = Sq_in(index_current,:,:)
        ! now look for close value wavevectors
-       do j=1, size(kmag_in)
+       do j=1, size(kmag_loc)
           index_local = index_current + j
-          if ( index_local > size(kmag_in)) exit
+          if ( index_local > size(kmag_loc)) exit
           ! see if differences in kvecs are less than resolution
-          if ( q_space > abs( kmag_current - kmag_in(index_local) )  )  then
+          if ( q_space > abs( kmag_current - kmag_loc(index_local) )  )  then
              ! add to average
              n_avg = n_avg + 1
-             kmag_avg(index_store) = kmag_avg(index_store) + kmag_in(index_local)
+             kmag_avg(index_store) = kmag_avg(index_store) + kmag_loc(index_local)
              Sq_avg(index_store,:,:)  =  Sq_avg(index_store,:,:) + Sq_in(index_local,:,:)
           else
              exit
@@ -488,33 +468,33 @@ contains
   ! as the above Sq_collapse_Ct subroutine, but needs
   ! to rearrange data structures first, and then calls the routine
   !*************
-  subroutine Sq_collapse_SQ2( nkmag_all, SQ2_avg , SQ2_store , kmag_1Dall_avg , kmag_1Dall , q_space )
+  subroutine Sq_collapse_SQ2( nkmag_all, Sq2_a_b , SQ2, kmag_1Dall_avg , kmag_1Dall , q_space )
     integer, intent(out)                 :: nkmag_all
-    real*8, dimension(:,:,:), intent(out) :: SQ2_avg
-    real*8, dimension(:,:,:,:,:), intent(in) :: SQ2_store
+    real*8, dimension(:,:,:), intent(out) :: Sq2_a_b
+    real*8, dimension(:,:,:,:,:), intent(in) :: SQ2
     real*8, dimension(:), intent(out) :: kmag_1Dall_avg
-    real*8, dimension(:), intent(inout)  :: kmag_1Dall
+    real*8, dimension(:), intent(in)  :: kmag_1Dall
     real*8, intent(in)                :: q_space
 
     real*8, dimension(:,:,:), allocatable :: SQ2_temp
     integer :: i_k, j_k, l_k, i_index_tot, K
 
-    K = size(SQ2_store(1,1,1,1,:))
+    K = size(SQ2(1,1,1,1,:))
 
     ! this is temporary array for data structure compatability
-    allocate(SQ2_temp(K*K*K,size(SQ2_store(:,1,1,1,1)),size(SQ2_store(1,:,1,1,1)) )  )
+    allocate(SQ2_temp(K*K*K,size(SQ2(:,1,1,1,1)),size(SQ2(1,:,1,1,1)) )  )
 
     i_index_tot=1
     do i_k=1,K
        do j_k=1,K
           do l_k=1,K
-             SQ2_temp(i_index_tot,:,:) = SQ2_store(:,:,i_k,j_k,l_k)
+             SQ2_temp(i_index_tot,:,:) = SQ2(:,:,i_k,j_k,l_k)
              i_index_tot = i_index_tot + 1
           enddo
        enddo
     enddo
 
-    call Sq_collapse_1D( nkmag_all, SQ2_avg , SQ2_temp, kmag_1Dall_avg, kmag_1Dall, q_space  )
+    call Sq_collapse_1D( nkmag_all, Sq2_a_b , SQ2_temp, kmag_1Dall_avg, kmag_1Dall, q_space  )
 
     deallocate(SQ2_temp)
 
@@ -525,36 +505,56 @@ contains
 
   !*********************************
   ! this subroutine prints correlation functions of the Structure factors
+  ! see definites of structure factor data types in the main subroutine in this
+  ! module
+  !
+  ! we use this subroutine to print both number and charge structure factors
+  ! input suffix "n" or "c" will signify what we are printing, and will tag
+  ! this suffix onto the file names accordingly
+  !
+  !  Note that if we're printing number density structure factors,
+  !  S(q) will be multipled by generic form factor function F(q)
+  !  which is approximation of element-independent function form
+  !  see function 'form_factor_approx'
+  !
+  !  Sq2n_a_b and Sq2c_a_b are "number" and "charge" square structure factors as
+  !  a function of (1D) wavevector magnitude and iontypes "a" and "b"
+  !
+  !  SqCtn_avg, and SqCtc_avg are S(q,t) TCFs for 1D S(q) for cation-cation,
+  !  anion-anion, and cation-anion cross structure factors
+  !  
   !*********************************
-  subroutine Sq_TCF_print( SQ2_avg, kmag_1Dall_avg , nkmag_all, SQ_Ct_avg, kmag_1D_avg, nmax_tcf, nkmag  )
+  subroutine Sq_TCF_print( Sq2_a_b, kmag_1Dall_avg , nkmag_all, SqCt_avg, kmag_1D_avg, nmax_tcf, nkmag, suffix  )
     use global_variables
-    real*8,dimension(:,:,:), intent(in) :: SQ2_avg, SQ_Ct_avg
+    real*8,dimension(:,:,:), intent(in) :: Sq2_a_b, SqCt_avg
     real*8,dimension(:) ,    intent(in) :: kmag_1Dall_avg, kmag_1D_avg
     integer, intent(in)                 :: nmax_tcf, nkmag, nkmag_all
+    character(1), intent(in)            :: suffix   ! this should be "n" or "c" corresponding to number or charge S(q)
 
     integer        :: i_k, i_type, i_t
-    real*8         :: Sq_print
+    real*8         :: fq,Sq_print
     character(100) :: filecatCt_out, fileanCt_out, filecatanCt_out, filetotCt_out
     character(100) :: filecatSq_out, fileanSq_out, filecatanSq_out, filetotSq_out
     character(100) :: filecatSqq2_out, fileanSqq2_out, filecatanSqq2_out, filetotSqq2_out
+   
     integer  :: ifile1, ifile2, ifile3, ifile4, ifile5 , ifile6, ifile7, ifile8, ifile9, ifile10, ifile11, ifile12
 
     ! this is for printing correlation function
     integer, parameter :: nk_print=15
 
     ! these are output file names
-    filecatCt_out = 'SqCt_cation.xvg'
-    fileanCt_out = 'SqCt_anion.xvg'
-    filecatanCt_out = 'SqCt_cat_an.xvg'
-    filetotCt_out = 'SqCt_total.xvg'
-    filecatSq_out = 'Sqavg_cation.xvg'
-    fileanSq_out = 'Sqavg_anion.xvg'
-    filecatanSq_out = 'Sqavg_cat_an.xvg'
-    filetotSq_out = 'Sqavg_total.xvg'
-    filecatSqq2_out = 'Sqq2avg_cation.xvg'
-    fileanSqq2_out = 'Sqq2avg_anion.xvg'
-    filecatanSqq2_out = 'Sqq2avg_cat_an.xvg'
-    filetotSqq2_out = 'Sqq2avg_total.xvg'
+    filecatCt_out = 'SqCt_cation' // suffix // '.xvg'
+    fileanCt_out = 'SqCt_anion' // suffix // '.xvg'
+    filecatanCt_out = 'SqCt_cat_an' // suffix // '.xvg'
+    filetotCt_out = 'SqCt_total' // suffix // '.xvg'
+    filecatSq_out = 'Sqavg_cation' // suffix // '.xvg'
+    fileanSq_out = 'Sqavg_anion' // suffix // '.xvg'
+    filecatanSq_out = 'Sqavg_cat_an' // suffix // '.xvg'
+    filetotSq_out = 'Sqavg_total' // suffix // '.xvg'
+    filecatSqq2_out = 'Sqq2avg_cation' // suffix // '.xvg'
+    fileanSqq2_out = 'Sqq2avg_anion' // suffix // '.xvg'
+    filecatanSqq2_out = 'Sqq2avg_cat_an' // suffix // '.xvg'
+    filetotSqq2_out = 'Sqq2avg_total' // suffix // '.xvg'
 
     ifile1=86
     ifile2=87
@@ -586,20 +586,32 @@ contains
     ! first print average Sq, Sq/q2
     ! skip first wavevector which is mag 0
     do i_k=2, nkmag_all 
+
+       ! if number density structure factor, multiply by approximate f(q)
+       Select Case(suffix)
+       Case('n')
+           fq = form_factor_approx( kmag_1Dall_avg(i_k) )
+       Case default
+           fq = 1d0
+       End Select
+
        ! cation
-       write(ifile5,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), SQ2_avg(i_k,1,1)
-       Sq_print = SQ2_avg(i_k,1,1) / kmag_1Dall_avg(i_k)**2
+       Sq_print = fq*Sq2_a_b(i_k,1,1)
+       write(ifile5,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
+       Sq_print = fq*Sq2_a_b(i_k,1,1) / kmag_1Dall_avg(i_k)**2
        write(ifile9,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
        ! anion
-       write(ifile6,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), SQ2_avg(i_k,2,2)
-       Sq_print = SQ2_avg(i_k,2,2) / kmag_1Dall_avg(i_k)**2
+       Sq_print = fq*Sq2_a_b(i_k,2,2)
+       write(ifile6,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
+       Sq_print = fq*Sq2_a_b(i_k,2,2) / kmag_1Dall_avg(i_k)**2
        write(ifile10,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
        ! cation-anion
-       write(ifile7,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), SQ2_avg(i_k,1,2)
-       Sq_print = SQ2_avg(i_k,1,2) / kmag_1Dall_avg(i_k)**2
+       Sq_print = fq*Sq2_a_b(i_k,1,2)
+       write(ifile7,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
+       Sq_print = fq*Sq2_a_b(i_k,1,2) / kmag_1Dall_avg(i_k)**2
        write(ifile11,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
        ! total
-       Sq_print = SQ2_avg(i_k,1,1) + SQ2_avg(i_k,2,2) + 2 * SQ2_avg(i_k,1,2)
+       Sq_print = fq*(Sq2_a_b(i_k,1,1) + Sq2_a_b(i_k,2,2) + 2 * Sq2_a_b(i_k,1,2))
        write(ifile8,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
        Sq_print = Sq_print / kmag_1Dall_avg(i_k)
        write(ifile12,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
@@ -607,6 +619,8 @@ contains
 
 
     ! now print correlation function, all wavevectors to each file
+    ! don't need fq prefactor here, as we normalize to Ct(0)
+
     !   do i_k=2, nkmag   ! this would print a lot of correlation functions
     do i_k=2, nk_print
        write(ifile1,*) ""
@@ -619,19 +633,19 @@ contains
        write(ifile4,*) "# C(t) for wavevector" , kmag_1D_avg(i_k)
        ! cation C(t)
        do i_t=1,nmax_tcf
-          write(ifile1,'(I8, E20.6)') i_t , SQ_Ct_avg(i_k,1,i_t) 
+          write(ifile1,'(I8, E20.6)') i_t , SqCt_avg(i_k,1,i_t) 
        enddo
        ! anion C(t)
        do i_t=1,nmax_tcf
-          write(ifile2,'(I8, E20.6)') i_t , SQ_Ct_avg(i_k,2,i_t)
+          write(ifile2,'(I8, E20.6)') i_t , SqCt_avg(i_k,2,i_t)
        enddo
        ! cation-anion C(t)
        do i_t=1,nmax_tcf
-          write(ifile3,'(I8, E20.6)') i_t , SQ_Ct_avg(i_k,3,i_t)
+          write(ifile3,'(I8, E20.6)') i_t , SqCt_avg(i_k,3,i_t)
        enddo
        ! total C(t)
        do i_t=1,nmax_tcf
-          Sq_print = SQ_Ct_avg(i_k,1,i_t) + SQ_Ct_avg(i_k,2,i_t) + 2 * SQ_Ct_avg(i_k,3,i_t)
+          Sq_print = SqCt_avg(i_k,1,i_t) + SqCt_avg(i_k,2,i_t) + 2 * SqCt_avg(i_k,3,i_t)
           write(ifile4,'(I8, E20.6)') i_t , Sq_print
        enddo
 
@@ -653,10 +667,10 @@ contains
   end subroutine Sq_TCF_print
 
 
-  subroutine  combine_partial_structure_factors( SQ2 , SQ_store )
+  subroutine  combine_partial_structure_factors( SQ2 , SQ )
     use global_variables
     real*8,dimension(:,:,:,:,:),intent(inout) :: SQ2
-    complex*16,dimension(:,:,:,:),intent(in) :: SQ_store
+    complex*16,dimension(:,:,:,:),intent(in) :: SQ
 
     integer :: i_type, j_type
 
@@ -664,83 +678,18 @@ contains
        do j_type = i_type, n_atom_type
 
           if ( i_type == j_type ) then
-             SQ2(i_type,j_type,:,:,:) = SQ2(i_type,j_type,:,:,:) + dble(SQ_store(i_type,:,:,:))**2+aimag(SQ_store(i_type,:,:,:))**2
+             SQ2(i_type,j_type,:,:,:) = SQ2(i_type,j_type,:,:,:) + dble(SQ(i_type,:,:,:))**2+aimag(SQ(i_type,:,:,:))**2
           else
              ! here we have unlike types, so we want SQi(c.c.) * SQj + SQi * SQj(c.c.) , where
              ! (c.c.) is complex conjugate, which equals 2 * real ( SQi * SQj(c.c.) )
-             !SQ2(i_type,j_type,:,:,:) = SQ2(i_type,j_type,:,:,:) + 2d0 * dble( SQ_store(i_type,:,:,:) * conjg((SQ_store(j_type,:,:,:))) )
+             !SQ2(i_type,j_type,:,:,:) = SQ2(i_type,j_type,:,:,:) + 2d0 * dble( SQ(i_type,:,:,:) * conjg((SQ(j_type,:,:,:))) )
              ! multiply by 0.5 for double counting
-             SQ2(i_type,j_type,:,:,:) = SQ2(i_type,j_type,:,:,:) + 0.5d0 *  2d0 * dble( SQ_store(i_type,:,:,:) * conjg((SQ_store(j_type,:,:,:))) )
+             SQ2(i_type,j_type,:,:,:) = SQ2(i_type,j_type,:,:,:) + 0.5d0 *  2d0 * dble( SQ(i_type,:,:,:) * conjg((SQ(j_type,:,:,:))) )
           end if
        enddo
     enddo
 
   end subroutine combine_partial_structure_factors
-
-
-
-  subroutine print_SQ( SQ2 , kk, K )
-    use global_variables
-    real*8,dimension(:,:,:),intent(in) :: SQ2
-    real*8,dimension(3,3),intent(in) :: kk
-    integer, intent(in) :: K
-
-    integer :: i, j , l , n
-    real*8, dimension(3) :: k_vec
-
-    do i=1, K
-       do j=1,K
-          do l=1,K
-             ! convert wavevector, note the reciprocal lattice vectors kk don't have the 2*pi factor
-             k_vec(:) = 2 * pi * ( dble(i-1) * kk(1,:) +  dble(j-1) * kk(2,:) +  dble(l-1) * kk(3,:)  )
-             Select Case(Charge_density_Sq)
-             Case('yes')
-                write(*,'(3F14.6, E20.6)') k_vec, SQ2(i,j,l)
-             case default
-                write(*,'(3F14.6, F20.6)') k_vec, SQ2(i,j,l)
-             end select
-          enddo
-       enddo
-    enddo
-
-  end subroutine print_SQ
-
-
-  ! *************************
-  ! if q_mag is greater than the longest qvec for which we
-  ! have the form factor, then return 0
-  !*************************
-  real*8 function get_form_fac( i_index, q_mag )
-    use global_variables
-    integer, intent(in) :: i_index
-    real*8, intent(in) :: q_mag
-
-    integer :: i, index, flag
-
-    !    flag=0
-    !    do i=1, max_q_form-1
-    !       if ( ( q_grid_form(i) < q_mag ) .and. ( q_mag < q_grid_form(i+1)  ) ) then
-    !          index = i
-    !          flag=1
-    !          exit
-    !       endif
-    !    enddo
-
-    !    if ( flag == 0 ) then
-    !       get_form_fac=0d0
-!!$       write(*,*) "couldn't find atomic form factor for q value ", q_mag
-!!$       stop
-    !   else
-    index = ceiling( q_mag / dq_form )
-    if ( index < max_q_form ) then
-       get_form_fac = atomtype_form( i_index, index )
-    else
-       get_form_fac = 0d0
-    endif
-    !   endif
-
-  end function get_form_fac
-
 
 
 
