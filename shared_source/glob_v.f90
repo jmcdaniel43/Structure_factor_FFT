@@ -47,7 +47,7 @@ module global_variables
 
 
    ! threads
-   integer, parameter :: n_threads=16
+   integer, parameter :: n_threads=8
 
    ! if there's an additional command line argument (integer), code will calculate
    ! a partial structure factor for that atom type

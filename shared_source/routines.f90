@@ -191,22 +191,38 @@ contains
   !*******************************************
   ! this subroutine reads the number of trajectories from a .gro file
   !*******************************************
-  subroutine get_n_trajectories( n_traj, n_atom, traj_file )
+  subroutine get_n_trajectories( n_traj, dt, n_atom, traj_file )
     use global_variables
     integer, intent(out) :: n_traj
+    real*8, intent(out)  :: dt
     character(*), intent(in) :: traj_file
     integer, intent(in) :: n_atom
 
-    character(50) :: line
-    integer :: ifile=99, inputstatus, i_line, i_atom
-
+    character(200) :: line
+    integer :: ifile=99, inputstatus, i_line, i_atom, nargs
+    real*8  :: t0, t1
+    character(80),dimension(10)  :: args
+    character(1) :: delim='='
     write(*,*) " figuring out number of snapshots from trajectory ...."
     open( ifile, file=traj_file, status='old' )
 
     n_traj = 0
-
     do
        Read(ifile,'(A)',Iostat=inputstatus) line
+       ! get dt from 1st and 2nd frames
+       if ( n_traj == 0 ) then
+          ! parse on '=', could be different number of words here...
+          call parse(line,delim,args,nargs)
+          ! make sure we're reading this correctly
+          if ( nargs /= 2 ) then
+             write(*,*) "can't read timestamp in 1st frame of trajectory"
+             stop
+          endif
+          read(args(2),*) t0 
+       elseif ( n_traj == 1 ) then
+          call parse(line,delim,args,nargs) 
+          read(args(2),*) t1     
+       endif
        If(inputstatus < 0) Exit
        n_traj = n_traj + 1
        Read(ifile,'(A)',Iostat=inputstatus) line
@@ -217,7 +233,9 @@ contains
        Read(ifile,'(A)',Iostat=inputstatus) line
     enddo
 
+    dt = t1-t0
     write(*,*) " number of snapshots : ", n_traj
+    write(*,*) " dt between snapshots ", dt , " ps"
     close( ifile )
 
   end subroutine get_n_trajectories
@@ -773,10 +791,10 @@ contains
           end if
           isp=1
 
-       case(33:)      ! not a space, quote, or control character
-          k=k+1
-          outstr(k:k)=ch
-          isp=0
+        case(33:)      ! not a space, quote, or control character
+           k=k+1
+           outstr(k:k)=ch
+           isp=0
 
        end select
 

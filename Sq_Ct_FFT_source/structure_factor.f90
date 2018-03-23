@@ -32,9 +32,8 @@ contains
     use pme_routines
     use MKL_DFTI
     integer, intent(in) :: n_atom
-    TYPE(DFTI_DESCRIPTOR), pointer,intent(in):: dfti_desc,dfti_desc_inv
+    TYPE(DFTI_DESCRIPTOR), pointer,intent(inout):: dfti_desc,dfti_desc_inv
     character(*), intent(in)  :: traj_file
-
     complex*16,dimension(:,:,:),allocatable::FQc, FQn
     real*8, dimension(:,:,:),allocatable :: SqCtc_avg, SqCtn_avg
     real*8, dimension(:,:,:,:,:),allocatable :: SQQc_a_b, SQQn_a_b  ! fortran not case sensitive QQ and q2
@@ -54,6 +53,7 @@ contains
     real*8,dimension(:), allocatable :: charge_iontype
     real*8,dimension(:,:),allocatable :: xyz, xyz_scale
     integer :: n_atom_kind, nkmag, nkmag_all, i_type, status, n_traj, nmax_tcf, i_step, ifile=99, i_atom
+    real*8 ::  dt
 
     ! note in this code we have disabled the use of Charge_density_Sq tag.  It
     ! should always be set to 'yes'
@@ -64,6 +64,11 @@ contains
        write(*,*) "must have Charge_density_Sq='yes'. Please change setting in glob_v.f90 "
        stop
     End Select
+
+    ! n_threads set in glob_v.f90
+    write(*,*) ""
+    write(*,*) "attempting to use ", n_threads , " threads in Q_grid calculation"
+    write(*,*) ""
 
     ! Here we approximate the q-dependence of the atomic form factors using in
     ! the number density scattering structure factor (X-ray) .  This is because
@@ -96,7 +101,7 @@ contains
     allocate( kmag_1Dall(pme_grid*pme_grid*pme_grid) )
 
     ! get number of trajectory snapshots
-    call get_n_trajectories( n_traj, n_atom, traj_file )
+    call get_n_trajectories( n_traj, dt, n_atom, traj_file )
 
     ! open trajectory file, so as we read it in on the fly
     open( ifile, file=traj_file, status='old' )
@@ -184,11 +189,17 @@ contains
 
     ! now print, note because we took the FT in reduced coordinates, we need to
     ! convert to the physical wavevectors
-   
+  
+    ! when we print correlation functions, we will also print power spectrum so
+    ! we will need to do Fourier transform.  Re-initialize the FFT descriptors
+    ! to 1D, don't need the old Descriptor anymore
+    
+    call initialize_FFT_1D_temporal( size(SqCtn_avg(1,1,:)), dfti_desc )
+ 
     ! print number density S(q)'s, output files will be labeled with suffix='n' 
-    call Sq_TCF_print( Sq2n_a_b, kmag_1Dall_avg , nkmag_all, SqCtn_avg, kmag_1D_avg, nmax_tcf, nkmag, "n"  )
+    call Sq_TCF_print( Sq2n_a_b, kmag_1Dall_avg , nkmag_all, SqCtn_avg, dt, kmag_1D_avg, nmax_tcf, nkmag, "n", dfti_desc )
     ! print charge density S(q)'s, output files will be labeled with suffix='c'
-    call Sq_TCF_print( Sq2c_a_b, kmag_1Dall_avg , nkmag_all, SqCtc_avg, kmag_1D_avg, nmax_tcf, nkmag, "c"  )
+    call Sq_TCF_print( Sq2c_a_b, kmag_1Dall_avg , nkmag_all, SqCtc_avg, dt, kmag_1D_avg, nmax_tcf, nkmag, "c", dfti_desc  )
 
 
     deallocate( Qc_grid, Qn_grid, FQc, FQn, q_1rc, q_1rn, q_1dc, q_1dn, SQc_a, SQn_a, SQQc_a_b, SQQn_a_b, Sq2c_a_b, Sq2n_a_b, SqCtc_aa, SqCtn_aa, Sqtc_a, Sqtn_a, SqCtc_avg, SqCtn_avg )
@@ -524,20 +535,26 @@ contains
   !  anion-anion, and cation-anion cross structure factors
   !  
   !*********************************
-  subroutine Sq_TCF_print( Sq2_a_b, kmag_1Dall_avg , nkmag_all, SqCt_avg, kmag_1D_avg, nmax_tcf, nkmag, suffix  )
+  subroutine Sq_TCF_print( Sq2_a_b, kmag_1Dall_avg , nkmag_all, SqCt_avg, dt, kmag_1D_avg, nmax_tcf, nkmag, suffix, dfti_desc )
+    use pme_routines
+    use MKL_DFTI
     use global_variables
     real*8,dimension(:,:,:), intent(in) :: Sq2_a_b, SqCt_avg
     real*8,dimension(:) ,    intent(in) :: kmag_1Dall_avg, kmag_1D_avg
     integer, intent(in)                 :: nmax_tcf, nkmag, nkmag_all
+    real*8 , intent(in)                 :: dt
     character(1), intent(in)            :: suffix   ! this should be "n" or "c" corresponding to number or charge S(q)
+    TYPE(DFTI_DESCRIPTOR), pointer,intent(inout):: dfti_desc
 
+    real*8,dimension(:), allocatable  :: Comega
     integer        :: i_k, i_type, i_t
-    real*8         :: fq,Sq_print
+    real*8         :: time, omega, fq,Sq_print
     character(100) :: filecatCt_out, fileanCt_out, filecatanCt_out, filetotCt_out
+    character(100) :: filecatCw_out, fileanCw_out, filecatanCw_out, filetotCw_out
     character(100) :: filecatSq_out, fileanSq_out, filecatanSq_out, filetotSq_out
     character(100) :: filecatSqq2_out, fileanSqq2_out, filecatanSqq2_out, filetotSqq2_out
    
-    integer  :: ifile1, ifile2, ifile3, ifile4, ifile5 , ifile6, ifile7, ifile8, ifile9, ifile10, ifile11, ifile12
+    integer  :: ifile1, ifile2, ifile3, ifile4, ifile5 , ifile6, ifile7, ifile8, ifile9, ifile10, ifile11, ifile12, ifile13, ifile14, ifile15, ifile16
 
     ! this is for printing correlation function
     integer, parameter :: nk_print=15
@@ -547,6 +564,10 @@ contains
     fileanCt_out = 'SqCt_anion' // suffix // '.xvg'
     filecatanCt_out = 'SqCt_cat_an' // suffix // '.xvg'
     filetotCt_out = 'SqCt_total' // suffix // '.xvg'
+    filecatCw_out = 'SqComega_cation' // suffix // '.xvg'
+    fileanCw_out = 'SqComega_anion' // suffix // '.xvg'
+    filecatanCw_out = 'SqComega_cat_an' // suffix // '.xvg'
+    filetotCw_out = 'SqComega_total' // suffix // '.xvg'
     filecatSq_out = 'Sqavg_cation' // suffix // '.xvg'
     fileanSq_out = 'Sqavg_anion' // suffix // '.xvg'
     filecatanSq_out = 'Sqavg_cat_an' // suffix // '.xvg'
@@ -568,6 +589,11 @@ contains
     ifile10=95
     ifile11=96
     ifile12=97
+    ifile13=98
+    ifile14=99
+    ifile15=100
+    ifile16=101
+
     open( ifile1, file=filecatCt_out, status='new' )
     open( ifile2, file=fileanCt_out, status='new' )
     open( ifile3, file=filecatanCt_out, status='new' )
@@ -580,7 +606,10 @@ contains
     open( ifile10, file=fileanSqq2_out, status='new' )
     open( ifile11, file=filecatanSqq2_out, status='new' )
     open( ifile12, file=filetotSqq2_out, status='new' )
-
+    open( ifile13, file=filecatCw_out, status='new' )
+    open( ifile14, file=fileanCw_out, status='new' )
+    open( ifile15, file=filecatanCw_out, status='new' )
+    open( ifile16, file=filetotCw_out, status='new' )
 
 
     ! first print average Sq, Sq/q2
@@ -617,37 +646,87 @@ contains
        write(ifile12,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
     enddo
 
+    ! this is for FT
+    allocate( Comega(size(SqCt_avg(1,1,:))) )
 
     ! now print correlation function, all wavevectors to each file
     ! don't need fq prefactor here, as we normalize to Ct(0)
 
     !   do i_k=2, nkmag   ! this would print a lot of correlation functions
+    !   dt is in ps
     do i_k=2, nk_print
        write(ifile1,*) ""
-       write(ifile1,*) "# C(t) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile1,*) "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
        write(ifile2,*) ""
-       write(ifile2,*) "# C(t) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile2,*) "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
        write(ifile3,*) ""
-       write(ifile3,*) "# C(t) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile3,*) "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
        write(ifile4,*) ""
-       write(ifile4,*) "# C(t) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile4,*) "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
+
+       write(ifile13,*) ""
+       write(ifile13,*) "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile14,*) ""
+       write(ifile14,*) "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile15,*) ""
+       write(ifile15,*) "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile16,*) ""
+       write(ifile16,*) "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
+
        ! cation C(t)
        do i_t=1,nmax_tcf
-          write(ifile1,'(I8, E20.6)') i_t , SqCt_avg(i_k,1,i_t) 
+          time=(i_t-1)*dt
+          write(ifile1,'(F14.1, E20.6)') time , SqCt_avg(i_k,1,i_t) 
        enddo
+       ! cation C(w)
+       Comega(:) = SqCt_avg(i_k,1,:)
+       call compute_FFT_1D_temporal( Comega , dfti_desc )
+       do i_t=1,nmax_tcf
+             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * dt ) 
+             write(ifile13,'(E14.6, E20.6)') omega , Comega(i_t)
+       enddo
+
        ! anion C(t)
        do i_t=1,nmax_tcf
-          write(ifile2,'(I8, E20.6)') i_t , SqCt_avg(i_k,2,i_t)
+          time=(i_t-1)*dt
+          write(ifile2,'(F14.1, E20.6)') time , SqCt_avg(i_k,2,i_t)
        enddo
+       ! anion C(w)
+       Comega(:) = SqCt_avg(i_k,2,:)
+       call compute_FFT_1D_temporal( Comega , dfti_desc )
+       do i_t=1,nmax_tcf
+             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * dt )
+             write(ifile14,'(E14.6, E20.6)') omega , Comega(i_t)
+       enddo
+
        ! cation-anion C(t)
        do i_t=1,nmax_tcf
-          write(ifile3,'(I8, E20.6)') i_t , SqCt_avg(i_k,3,i_t)
+          time=(i_t-1)*dt
+          write(ifile3,'(F14.1, E20.6)') time , SqCt_avg(i_k,3,i_t)
        enddo
+       ! cation-anion C(w)
+       Comega(:) = SqCt_avg(i_k,3,:)
+       call compute_FFT_1D_temporal( Comega , dfti_desc )
+       do i_t=1,nmax_tcf
+             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * dt )
+             write(ifile15,'(E14.6, E20.6)') omega , Comega(i_t)
+       enddo
+
+
        ! total C(t)
        do i_t=1,nmax_tcf
+          time=(i_t-1)*dt
           Sq_print = SqCt_avg(i_k,1,i_t) + SqCt_avg(i_k,2,i_t) + 2 * SqCt_avg(i_k,3,i_t)
-          write(ifile4,'(I8, E20.6)') i_t , Sq_print
+          write(ifile4,'(F14.1, E20.6)') time , Sq_print
        enddo
+       ! total C(w)
+       Comega(:) = SqCt_avg(i_k,1,:) + SqCt_avg(i_k,2,:) + 2 * SqCt_avg(i_k,3,:)
+       call compute_FFT_1D_temporal( Comega , dfti_desc )
+       do i_t=1,nmax_tcf
+             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * dt )
+             write(ifile16,'(E14.6, E20.6)') omega , Comega(i_t)
+       enddo
+
 
     enddo
 
@@ -663,6 +742,11 @@ contains
     close(ifile10)
     close(ifile11)
     close(ifile12)
+    close(ifile13)
+    close(ifile14)
+    close(ifile15)
+    close(ifile16)
+
 
   end subroutine Sq_TCF_print
 

@@ -26,6 +26,7 @@ contains
     real*8,dimension(:), allocatable::q_1r
     complex*16,dimension(:), allocatable::q_1d
     real*8,dimension(3,3) :: kk, kk_avg, box
+    real*8  :: dt
     integer :: n, K
     real*8,dimension(:), allocatable :: charge_iontype
     real*8,dimension(:,:),allocatable :: xyz, xyz_scale
@@ -49,7 +50,7 @@ contains
     SQ2_store=0d0
 
     ! get number of trajectory snapshots
-    call get_n_trajectories( n_traj, n_atom, traj_file )
+    call get_n_trajectories( n_traj, dt, n_atom, traj_file )
     ! open trajectory file, so as we read it in on the fly
     open( ifile, file=traj_file, status='old' )
 

@@ -16,6 +16,41 @@ module pme_routines
 contains
 
 
+  !******** this initializes 1D FFT for temporal domain
+  subroutine initialize_FFT_1D_temporal( n_traj, dfti_desc )
+    use MKL_DFTI
+    integer, intent(in) :: n_traj
+    TYPE(DFTI_DESCRIPTOR), pointer,intent(inout):: dfti_desc
+    
+    integer:: length(1), status
+
+    length=n_traj
+    status=DftiFreeDescriptor(dfti_desc)
+    status=DftiCreateDescriptor(dfti_desc, DFTI_DOUBLE, DFTI_COMPLEX, 1, length)
+    status=DftiCommitDescriptor(dfti_desc)
+
+  end subroutine initialize_FFT_1D_temporal
+
+
+  !******* this computes 1D temporal FFT.  Assuming correlation function
+  ! this is even, so FFT has not zero real part only...
+  subroutine compute_FFT_1D_temporal( Comega , dfti_desc )
+    use MKL_DFTI
+    real*8, dimension(:), intent(inout) :: Comega
+    TYPE(DFTI_DESCRIPTOR), pointer,intent(in):: dfti_desc
+    integer :: status
+    complex*16, dimension(:), allocatable :: Ctemp
+
+    allocate( Ctemp(size(Comega)) )
+
+    Ctemp=cmplx(Comega,0.,16)
+    status=DftiComputeForward(dfti_desc, Ctemp)
+    Comega = real(Ctemp)
+
+  end subroutine compute_FFT_1D_temporal
+
+
+  !******** this initializes Bsplines and 3D FFT for S(q)
   subroutine initialize_spline_FFT(dfti_desc,dfti_desc_inv)
     use MKL_DFTI
     use global_variables
