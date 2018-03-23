@@ -256,7 +256,7 @@ contains
     integer, intent(in)               :: n_traj
 
     integer :: i_k , j_k , l_k, i_index, i_index_tot, i_type
-    real*8, parameter :: k_mag_max = 1.0  ! maximum wavevector for computing correlation function in inverse angstrom
+    real*8, parameter :: k_mag_max = 1.8  ! maximum wavevector for computing correlation function in inverse angstrom
     real*8                 :: k_mag, k_vec(3)
 
        ! initialize
@@ -557,7 +557,7 @@ contains
     integer  :: ifile1, ifile2, ifile3, ifile4, ifile5 , ifile6, ifile7, ifile8, ifile9, ifile10, ifile11, ifile12, ifile13, ifile14, ifile15, ifile16
 
     ! this is for printing correlation function
-    integer, parameter :: nk_print=15
+    !integer, parameter :: nk_print=40
 
     ! these are output file names
     filecatCt_out = 'SqCt_cation' // suffix // '.xvg'
@@ -652,26 +652,32 @@ contains
     ! now print correlation function, all wavevectors to each file
     ! don't need fq prefactor here, as we normalize to Ct(0)
 
-    !   do i_k=2, nkmag   ! this would print a lot of correlation functions
+    if ( nk_print > nkmag ) then
+       write(*,*) "nk_print > nkmag , please increase setting of nkmag "
+       write(*,*) "ACF calculation"
+       stop
+    end if
+
+    do i_k=2, nkmag   ! this would print a lot of correlation functions
     !   dt is in ps
-    do i_k=2, nk_print
+    !do i_k=2, nk_print
        write(ifile1,*) ""
-       write(ifile1,*) "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile1,'(A30,F14.4)') "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
        write(ifile2,*) ""
-       write(ifile2,*) "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile2,'(A30,F14.4)') "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
        write(ifile3,*) ""
-       write(ifile3,*) "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile3,'(A30,F14.4)') "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
        write(ifile4,*) ""
-       write(ifile4,*) "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile4,'(A30,F14.4)') "# C(t) (ps) for wavevector" , kmag_1D_avg(i_k)
 
        write(ifile13,*) ""
-       write(ifile13,*) "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile13,'(A30,F14.4)') "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
        write(ifile14,*) ""
-       write(ifile14,*) "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile14,'(A30,F14.4)') "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
        write(ifile15,*) ""
-       write(ifile15,*) "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile15,'(A30,F14.4)') "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
        write(ifile16,*) ""
-       write(ifile16,*) "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
+       write(ifile16,'(A30,F14.4)') "# C(omega) (rad/ps) for wavevector" , kmag_1D_avg(i_k)
 
        ! cation C(t)
        do i_t=1,nmax_tcf
