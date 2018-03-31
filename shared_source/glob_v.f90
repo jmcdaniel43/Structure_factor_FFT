@@ -1,7 +1,7 @@
 module global_variables
 
    real*8, parameter :: pi = 3.141592654
-   integer, parameter :: MAX_FN=100, MAX_ANAME=5, MAX_N_ATOM=14000 ,  MAX_N_ATOM_TYPE=20
+   integer, parameter :: MAX_FN=100, MAX_ANAME=5, MAX_N_ATOM=80000 ,  MAX_N_ATOM_TYPE=20
 
    integer, parameter :: max_q_form = 20000
    real*8  :: dq_form

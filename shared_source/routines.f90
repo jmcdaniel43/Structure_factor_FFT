@@ -544,11 +544,12 @@ contains
   ! as initialize_non_orth_transform subroutine, but we keep both
   ! in for compatibility with older code
   !******************************************
-  subroutine construct_reciprocal_lattice_vector(kk,box)
+  subroutine construct_reciprocal_lattice_vector(kk,vol,box)
     real*8,dimension(:,:),intent(out) :: kk
+    real*8, intent(out)   :: vol
     real*8,dimension(:,:),intent(in) :: box
 
-    real*8 :: a(3), b(3), c(3), ka(3), kb(3), kc(3), vol
+    real*8 :: a(3), b(3), c(3), ka(3), kb(3), kc(3)
 
     a(:) = box(1,:)
     b(:) = box(2,:)

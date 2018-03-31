@@ -53,7 +53,7 @@ contains
     real*8,dimension(:), allocatable :: charge_iontype
     real*8,dimension(:,:),allocatable :: xyz, xyz_scale
     integer :: n_atom_kind, nkmag, nkmag_all, i_type, status, n_traj, nmax_tcf, i_step, ifile=99, i_atom
-    real*8 ::  dt
+    real*8 :: vol, dt
 
     ! note in this code we have disabled the use of Charge_density_Sq tag.  It
     ! should always be set to 'yes'
@@ -114,7 +114,7 @@ contains
     do i_step =1, n_traj
        ! read coordinates from trajectory file
        call read_trajectory_snapshot( ifile , xyz , box, n_atom )
-       call construct_reciprocal_lattice_vector(kk, box)
+       call construct_reciprocal_lattice_vector(kk,vol, box)
 
        ! get average of reciprocal lattice vectors for end
        kk_avg = kk_avg + kk
@@ -145,6 +145,10 @@ contains
              SQn_a(i_type,:,:,:) = FQn*B
              SQc_a(i_type,:,:,:) = FQc*B
           enddo
+
+          ! normalize by volume.  Stot=Sa*Sb/Volume, so multiply each  1 / vol**(1/2)
+          SQn_a = SQn_a / vol**(0.5d0)
+          SQc_a = SQc_a / vol**(0.5d0)
 
           ! now create all the cross SQ2 structure factors for this snapshot
           call combine_partial_structure_factors( SQQn_a_b , SQn_a )
@@ -642,7 +646,7 @@ contains
        ! total
        Sq_print = fq*(Sq2_a_b(i_k,1,1) + Sq2_a_b(i_k,2,2) + 2 * Sq2_a_b(i_k,1,2))
        write(ifile8,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
-       Sq_print = Sq_print / kmag_1Dall_avg(i_k)
+       Sq_print = Sq_print / kmag_1Dall_avg(i_k)**2
        write(ifile12,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
     enddo
 

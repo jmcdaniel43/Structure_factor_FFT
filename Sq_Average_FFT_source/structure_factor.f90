@@ -26,7 +26,7 @@ contains
     real*8,dimension(:), allocatable::q_1r
     complex*16,dimension(:), allocatable::q_1d
     real*8,dimension(3,3) :: kk, kk_avg, box
-    real*8  :: dt
+    real*8  ::vol, dt
     integer :: n, K
     real*8,dimension(:), allocatable :: charge_iontype
     real*8,dimension(:,:),allocatable :: xyz, xyz_scale
@@ -63,7 +63,7 @@ contains
        ! read coordinates from trajectory file
        call read_trajectory_snapshot( ifile , xyz , box, n_atom )
 
-       call construct_reciprocal_lattice_vector(kk, box)
+       call construct_reciprocal_lattice_vector(kk,vol, box)
 
        ! get average of reciprocal lattice vectors for end
        kk_avg = kk_avg + kk
