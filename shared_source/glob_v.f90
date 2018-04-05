@@ -1,7 +1,7 @@
 module global_variables
 
    real*8, parameter :: pi = 3.141592654
-   integer, parameter :: MAX_FN=100, MAX_ANAME=5, MAX_N_ATOM=80000 ,  MAX_N_ATOM_TYPE=20
+   integer, parameter :: MAX_FN=100, MAX_ANAME=5, MAX_N_ATOM=110000 ,  MAX_N_ATOM_TYPE=20
 
    integer, parameter :: max_q_form = 20000
    real*8  :: dq_form
@@ -29,7 +29,7 @@ module global_variables
 
    ! FFT
    integer, parameter :: pme_max_print=20  ! this should be less than or equal to the setting of pme_grid
-   integer,parameter :: pme_grid=20
+   integer,parameter :: pme_grid=40
    integer,parameter :: spline_order=6
    integer, parameter :: spline_grid = 100000
    real*8,dimension(spline_grid) :: B6_spline, B5_spline, B4_spline, B3_spline 

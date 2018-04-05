@@ -50,7 +50,7 @@ contains
     complex*16,dimension(:), allocatable::q_1dc, q_1dn
     real*8,dimension(3,3) :: kk, kk_avg, box
     integer :: n, K
-    real*8,dimension(:), allocatable :: charge_iontype
+    real*8,dimension(:), allocatable :: charge_iontype, atomic_number_iontype
     real*8,dimension(:,:),allocatable :: xyz, xyz_scale
     integer :: n_atom_kind, nkmag, nkmag_all, i_type, status, n_traj, nmax_tcf, i_step, ifile=99, i_atom
     real*8 :: vol, dt
@@ -107,7 +107,7 @@ contains
     open( ifile, file=traj_file, status='old' )
 
     ! create scaled coordinates
-    allocate(xyz(n_atom,3), xyz_scale(n_atom,3), charge_iontype(n_atom))
+    allocate(xyz(n_atom,3), xyz_scale(n_atom,3), charge_iontype(n_atom), atomic_number_iontype(n_atom))
 
     ! now loop over trajectories
 
@@ -129,10 +129,10 @@ contains
              ! note this only creates coordinates for atomtype "i_type"
              ! charge_iontype stores charges for atoms in xyz_scale array,
              ! with corresponding indices
-             call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K, charge_iontype)
+             call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K, charge_iontype, atomic_number_iontype)
              ! two different Q_grids, one for electron number density, Qn_grid
              ! one for total charge density, Qc_grid
-             call grid_Q(Qn_grid,Qc_grid,xyz_scale,n_atom_kind,K,n,charge_iontype)
+             call grid_Q(Qn_grid,Qc_grid,xyz_scale,n_atom_kind,K,n,charge_iontype, atomic_number_iontype)
              q_1rn=RESHAPE(Qn_grid, (/K**3/) )
              q_1rc=RESHAPE(Qc_grid, (/K**3/) )
              q_1dn=cmplx(q_1rn,0.,16)

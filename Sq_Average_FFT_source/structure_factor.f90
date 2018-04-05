@@ -28,7 +28,7 @@ contains
     real*8,dimension(3,3) :: kk, kk_avg, box
     real*8  ::vol, dt
     integer :: n, K
-    real*8,dimension(:), allocatable :: charge_iontype
+    real*8,dimension(:), allocatable :: charge_iontype, atomic_number_iontype
     real*8,dimension(:,:),allocatable :: xyz, xyz_scale
     integer :: n_atom_kind, i_type, status, n_traj, i_step, ifile=99, i_atom
 
@@ -55,7 +55,7 @@ contains
     open( ifile, file=traj_file, status='old' )
 
     ! create scaled coordinates
-    allocate(xyz(n_atom,3), xyz_scale(n_atom,3), charge_iontype(n_atom))
+    allocate(xyz(n_atom,3), xyz_scale(n_atom,3), charge_iontype(n_atom), atomic_number_iontype(n_atom))
 
     ! now loop over trajectories
 
@@ -77,10 +77,10 @@ contains
              ! note this only creates coordinates for atomtype "i_type"
              ! charge_iontype stores charges for atoms in xyz_scale array,
              ! with corresponding indices
-             call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K, charge_iontype)
+             call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K, charge_iontype,atomic_number_iontype)
              ! returns both Qn number density and Qc charge density grids.
              ! here, we are only using Qc
-             call grid_Q(Qn,Qc,xyz_scale,n_atom_kind,K,n, charge_iontype)
+             call grid_Q(Qn,Qc,xyz_scale,n_atom_kind,K,n, charge_iontype,atomic_number_iontype)
              q_1r=RESHAPE(Qc, (/K**3/) )
              q_1d=cmplx(q_1r,0.,16)
              status=DftiComputeForward(dfti_desc, q_1d)
@@ -103,7 +103,10 @@ contains
                 call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K)
                 ! returns both Qn number density and Qc charge density grids.
                 ! here, we are only using Qn
-                call grid_Q(Qn,Qc,xyz_scale,n_atom_kind,K,n)
+                ! input arrays charge_iontype and atomic_number_iontype are
+                ! allocated but uninitialized.  This is fine, as they will not
+                ! be used here, just token inputs
+                call grid_Q(Qn,Qc,xyz_scale,n_atom_kind,K,n,charge_iontype,atomic_number_iontype)
                 q_1r=RESHAPE(Qn, (/K**3/) )
                 q_1d=cmplx(q_1r,0.,16)
                 status=DftiComputeForward(dfti_desc, q_1d)
@@ -121,7 +124,10 @@ contains
              call create_scaled_direct_coordinates(i_type, xyz_scale, xyz, n_atom, n_atom_kind, kk, K)
              ! returns both Qn number density and Qc charge density grids.
              ! here, we are only using Qn
-             call grid_Q(Qn,Qc,xyz_scale,n_atom_kind,K,n)
+             ! input arrays charge_iontype and atomic_number_iontype are
+             ! allocated but uninitialized.  This is fine, as they will not
+             ! be used here, just token inputs
+             call grid_Q(Qn,Qc,xyz_scale,n_atom_kind,K,n,charge_iontype,atomic_number_iontype)
              q_1r=RESHAPE(Qn, (/K**3/) )
              q_1d=cmplx(q_1r,0.,16)
              status=DftiComputeForward(dfti_desc, q_1d)

@@ -494,7 +494,7 @@ contains
   ! 
   ! note, only coordinates are returned for atoms of type "i_type"
   !********************************************
-  subroutine create_scaled_direct_coordinates(i_type,xyz_scale, xyz, n_atom, n_atom_kind, kk, K,charge_iontype)
+  subroutine create_scaled_direct_coordinates(i_type,xyz_scale, xyz, n_atom, n_atom_kind, kk, K,charge_iontype, atomic_number_iontype)
     use global_variables
     integer  , intent(in)  :: i_type
     real*8,dimension(:,:),intent(out) :: xyz_scale
@@ -503,7 +503,7 @@ contains
     integer, intent(out) :: n_atom_kind
     real*8,dimension(:,:),intent(in) :: kk
     integer, intent(in) :: K
-    real*8,dimension(:),intent(out),optional:: charge_iontype
+    real*8,dimension(:),intent(out),optional:: charge_iontype, atomic_number_iontype
 
     integer :: i_atom,j,l, index
     real*8,parameter :: small=1D-6
@@ -518,6 +518,7 @@ contains
           ! if outputting charge_iontype
           if( present(charge_iontype) ) then
              charge_iontype(i_atom) = charges(j)  ! charges is global array
+             atomic_number_iontype(i_atom) = atomic_number(j) ! atomic_number is global array
           endif
           do l=1,3
              xyz_scale(i_atom,l)=dble(K)*dot_product(kk(l,:),xyz(j,:))

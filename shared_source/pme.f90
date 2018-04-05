@@ -105,25 +105,26 @@ contains
   ! then we are creating two Qgrids, one with charge density, and
   ! one with electron number density (X-ray structure)
   !*****************************************************************
-  subroutine grid_Q(Qn,Qc, xyz,n_atom,K,n,charge_iontype)
+  subroutine grid_Q(Qn,Qc, xyz,n_atom,K,n,charge_iontype,atomic_number_iontype)
     use global_variables
     use omp_lib
     integer, intent(in) :: n_atom
     real*8, intent(in), dimension(:,:) :: xyz
     integer,intent(in)::K,n
-    real*8,dimension(:),intent(in),optional::charge_iontype
+    real*8,dimension(:),intent(in)::charge_iontype,atomic_number_iontype
     real*8,dimension(:,:,:),intent(out)::Qn,Qc
     integer::i,j,k1,k2,k3,n1,n2,n3,nn1,nn2,nn3,nearpt(3),splindex(3)
     real*8::sum1,sum2
     real*8,dimension(3)::u,arg
 
+    
 
     Qn=0D0
     Qc=0d0
  
     ! parameter spline_grid undeclared, but ok
     call OMP_SET_NUM_THREADS(n_threads)
-    !$OMP PARALLEL DEFAULT(PRIVATE) SHARED(n_atom,xyz,charge_iontype,atomic_number,n,B6_spline,B4_spline,K) REDUCTION(+:Qn,Qc)
+    !$OMP PARALLEL DEFAULT(PRIVATE) SHARED(n_atom,xyz,charge_iontype,atomic_number_iontype,n,B6_spline,B4_spline,K) REDUCTION(+:Qn,Qc)
     !$OMP DO SCHEDULE(dynamic, n_threads)
     !$
     do j=1,n_atom
@@ -164,7 +165,7 @@ contains
                        ! number density (sum1) and total charge (sum2) structure factors
                        ! Qn, we multiply by atomic_number, as we are using a
                        ! general approximation for atomic form factors to save time
-                       sum1=atomic_number(j)*B6_spline(splindex(1))*B6_spline(splindex(2))*B6_spline(splindex(3))
+                       sum1=atomic_number_iontype(j)*B6_spline(splindex(1))*B6_spline(splindex(2))*B6_spline(splindex(3))
                        sum2=charge_iontype(j)*B6_spline(splindex(1))*B6_spline(splindex(2))*B6_spline(splindex(3))
                    Case default
                        ! we will mutiply S(q) by form factor F(q), so we don't multiply by atomic_number here
@@ -176,7 +177,7 @@ contains
                        ! number density (sum1) and total charge (sum2) structure factors
                        ! Qn, we multiply by atomic_number, as we are using a
                        ! general approximation for atomic form factors to save time
-                       sum1=atomic_number(j)*B4_spline(splindex(1))*B4_spline(splindex(2))*B4_spline(splindex(3))   
+                       sum1=atomic_number_iontype(j)*B4_spline(splindex(1))*B4_spline(splindex(2))*B4_spline(splindex(3))   
                        sum2=charge_iontype(j)*B4_spline(splindex(1))*B4_spline(splindex(2))*B4_spline(splindex(3))
                    Case default
                        ! we will mutiply S(q) by form factor F(q), so we don't multiply by atomic_number here
