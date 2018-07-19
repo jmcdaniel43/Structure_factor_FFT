@@ -5,7 +5,7 @@ program compute_structure_factor
   use MKL_DFTI
   use pme_routines
 
-  character(MAX_FN) :: ifile_conf, traj_file, charge_file, form_file_dir
+  character(MAX_FN) :: ifile_conf, traj_file, charge_file, parameter_file, form_file_dir
   character(MAX_ANAME), dimension(MAX_N_ATOM) :: alist
   integer      :: n_atom
   real*8, dimension(MAX_N_ATOM,3) :: xyz
@@ -33,8 +33,9 @@ program compute_structure_factor
   ! form_file_dir is directory with scattering form functions are located, and
   ! is only input if we're computing number density structure factor
 
-  call sort_input_files( ifile_conf, traj_file, charge_file , form_file_dir )
+  call sort_input_files( ifile_conf, traj_file, charge_file , parameter_file, form_file_dir )
   call read_gro( ifile_conf, n_atom, xyz, alist, box )
+  call read_parameter_file( parameter_file )
 
   Select Case(Charge_density_Sq)
   Case("yes")

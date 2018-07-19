@@ -47,6 +47,9 @@ contains
     status=DftiComputeForward(dfti_desc, Ctemp)
     Comega = real(Ctemp)
 
+    ! Unscale Forward FT by Ngrid
+    Comega = Comega / real(size(Comega))
+
   end subroutine compute_FFT_1D_temporal
 
 

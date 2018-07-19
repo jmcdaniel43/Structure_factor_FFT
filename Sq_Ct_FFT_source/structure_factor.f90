@@ -53,7 +53,21 @@ contains
     real*8,dimension(:), allocatable :: charge_iontype, atomic_number_iontype
     real*8,dimension(:,:),allocatable :: xyz, xyz_scale
     integer :: n_atom_kind, nkmag, nkmag_all, i_type, status, n_traj, nmax_tcf, i_step, ifile=99, i_atom
-    real*8 :: vol, dt
+    real*8 :: vol
+
+  
+    !  if n_atom_type == 3, then we have solvent molecules present.
+    !  if n_atom_type == 2, just cations and anions
+    Select Case(n_atom_type)
+    Case(2)
+      write(*,*) ""
+      write(*,*) "No solvent detected, Computing Sq's for pure ionic liquid"
+      write(*,*) ""    
+    Case(3)
+      write(*,*) ""
+      write(*,*) "Solvent detected, total Sq will contain solvent contribution"
+      write(*,*) ""
+    End Select
 
     ! note in this code we have disabled the use of Charge_density_Sq tag.  It
     ! should always be set to 'yes'
@@ -101,7 +115,7 @@ contains
     allocate( kmag_1Dall(pme_grid*pme_grid*pme_grid) )
 
     ! get number of trajectory snapshots
-    call get_n_trajectories( n_traj, dt, n_atom, traj_file )
+    call get_n_trajectories( n_traj, n_atom, traj_file )
 
     ! open trajectory file, so as we read it in on the fly
     open( ifile, file=traj_file, status='old' )
@@ -121,7 +135,7 @@ contains
 
        if ( i_step == 1 ) then
           ! initialize Sqt, TCF datastructures
-          call Sqt_initialize_datastructures(SqCtc_aa, SqCtn_aa, Sqtc_a, Sqtn_a, n_traj, kk )
+          call Sqt_initialize_datastructures(SqCtc_aa, SqCtn_aa, Sqtc_a, Sqtn_a, n_traj, kk, nmax_tcf )
        end if
 
           do i_type = 1 , n_atom_type  ! n_atom_type=2, cation atoms=1, anion atoms=2
@@ -172,6 +186,7 @@ contains
     write(*,*) kk_avg(2,:)
     write(*,*) kk_avg(3,:)
 
+
     ! compute correlation functions for both number and charge
     ! structure factors
     call Sq_TCF_compute( nmax_tcf, kk_avg, SqCtn_aa, Sqtn_a  )
@@ -201,9 +216,9 @@ contains
     call initialize_FFT_1D_temporal( size(SqCtn_avg(1,1,:)), dfti_desc )
  
     ! print number density S(q)'s, output files will be labeled with suffix='n' 
-    call Sq_TCF_print( Sq2n_a_b, kmag_1Dall_avg , nkmag_all, SqCtn_avg, dt, kmag_1D_avg, nmax_tcf, nkmag, "n", dfti_desc )
+    call Sq_TCF_print( Sq2n_a_b, kmag_1Dall_avg , nkmag_all, SqCtn_avg, kmag_1D_avg, nmax_tcf, nkmag, "n", dfti_desc )
     ! print charge density S(q)'s, output files will be labeled with suffix='c'
-    call Sq_TCF_print( Sq2c_a_b, kmag_1Dall_avg , nkmag_all, SqCtc_avg, dt, kmag_1D_avg, nmax_tcf, nkmag, "c", dfti_desc  )
+    call Sq_TCF_print( Sq2c_a_b, kmag_1Dall_avg , nkmag_all, SqCtc_avg, kmag_1D_avg, nmax_tcf, nkmag, "c", dfti_desc  )
 
 
     deallocate( Qc_grid, Qn_grid, FQc, FQn, q_1rc, q_1rn, q_1dc, q_1dn, SQc_a, SQn_a, SQQc_a_b, SQQn_a_b, Sq2c_a_b, Sq2n_a_b, SqCtc_aa, SqCtn_aa, Sqtc_a, Sqtn_a, SqCtc_avg, SqCtn_avg )
@@ -252,16 +267,22 @@ contains
   ! the magnitude of the wavevector mapped to index  i_index in
   ! Sqt(i_index,i_type,i_step)
   !*********************************
-  subroutine Sqt_initialize_datastructures(SqCtc_aa, SqCtn_aa, Sqtc_a, Sqtn_a,n_traj, kk )
+  subroutine Sqt_initialize_datastructures(SqCtc_aa, SqCtn_aa, Sqtc_a, Sqtn_a,n_traj, kk, nmax_tcf )
     use global_variables
     complex*16, allocatable, dimension(:,:,:), intent(inout) :: Sqtc_a, Sqtn_a
     real*8, allocatable, dimension(:,:,:), intent(inout) :: SqCtc_aa, SqCtn_aa
     real*8,dimension(:,:), intent(in) :: kk
     integer, intent(in)               :: n_traj
+    integer, intent(out)              :: nmax_tcf
 
     integer :: i_k , j_k , l_k, i_index, i_index_tot, i_type
-    real*8, parameter :: k_mag_max = 1.8  ! maximum wavevector for computing correlation function in inverse angstrom
     real*8                 :: k_mag, k_vec(3)
+
+
+    ! use nmax_tcf_frac times the trajectory size for tau
+    ! nmax_tcf_frac is read in as input parameter
+    nmax_tcf = int( (n_traj-1) * nmax_tcf_frac)
+
 
        ! initialize
        max_index_list=0
@@ -307,8 +328,8 @@ contains
        write(*,*) "will compute correlation function for  ", i_index, "wavevectors"
        allocate( Sqtc_a(i_index, n_atom_type, n_traj), Sqtn_a(i_index, n_atom_type, n_traj)  )
        ! here we assume we are computing correlation function for cation-cation,
-       ! anion-anion, and cation-anion, hence three indices
-       allocate( SqCtc_aa(i_index, 3, n_traj), SqCtn_aa(i_index, 3, n_traj), kmag_1D(i_index)  )
+       ! anion-anion, and cation-anion, and total, hence four indices
+       allocate( SqCtc_aa(i_index, 4, nmax_tcf), SqCtn_aa(i_index, 4, nmax_tcf), kmag_1D(i_index)  )
 
   end subroutine  Sqt_initialize_datastructures
 
@@ -351,17 +372,16 @@ contains
     use global_variables
     complex*16, dimension(:,:,:), intent(inout)  :: Sqt_a
     real*8 ,  dimension(:,:,:), intent(inout)  :: SqCt_aa
-    integer, intent(out) :: nmax_tcf
+    integer, intent(in) :: nmax_tcf
     real*8,dimension(:,:), intent(in) :: kk_avg
 
     integer :: i_k , j_k , l_k, i_index, i_type, i_t0, i_t1, i_tau, i_max
     integer, dimension(:), allocatable :: n_avg
-    real*8                 :: k_mag, k_vec(3), SQlocal(4)
+    real*8                 :: norm,k_mag, k_vec(3), SQlocal(4)
+    complex*16             :: Sqtotalt0, Sqtotalt1
 
     ! compute correlation functions
     i_max = size(Sqt_a(1,1,:))-1
-    ! use 1/4 the trajectory size for tau for statistics reasons
-    nmax_tcf = i_max/4
 
     allocate(n_avg(i_max))
     SqCt_aa=0d0
@@ -369,7 +389,7 @@ contains
     do i_t0 = 1, i_max
        ! use 1/4 the trajectory size for tau for statistics reasons
        do i_tau = 1 , nmax_tcf
-          i_t1 = i_t0 + i_tau
+          i_t1 = i_t0 + i_tau - 1
           if ( i_t1 <= i_max) then
              n_avg(i_tau) = n_avg(i_tau) + 1
              do i_index=1, size(Sqt_a(:,1,1))
@@ -380,6 +400,17 @@ contains
                 ! cation-anion
                 SqCt_aa(i_index,3,i_tau) = SqCt_aa(i_index,3,i_tau) + dble(Sqt_a(i_index,2,i_t1) * conjg(Sqt_a(i_index,1,i_t0)))
                 SqCt_aa(i_index,3,i_tau) = SqCt_aa(i_index,3,i_tau) + dble(Sqt_a(i_index,1,i_t1) * conjg(Sqt_a(i_index,2,i_t0)))
+                ! total--this depends on whether there is solvent or not
+                Select Case(n_atom_type)
+                Case(2)
+                  ! no solvent
+                  Sqtotalt0 = Sqt_a(i_index,1,i_t0) + Sqt_a(i_index,2,i_t0)  
+                  Sqtotalt1 = Sqt_a(i_index,1,i_t1) + Sqt_a(i_index,2,i_t1)
+                  SqCt_aa(i_index,4,i_tau) = SqCt_aa(i_index,4,i_tau) + 2*dble(Sqtotalt1 * conjg(Sqtotalt0) )
+                Case(3)
+                  ! solvent present, total structure factor is stored in 3rd index
+                  SqCt_aa(i_index,4,i_tau) = SqCt_aa(i_index,4,i_tau) + 2*dble(Sqt_a(i_index,3,i_t1) * conjg(Sqt_a(i_index,3,i_t0)))                  
+                End Select
              enddo
           endif
        enddo
@@ -390,6 +421,15 @@ contains
        SqCt_aa(:,:,i_tau) = SqCt_aa(:,:,i_tau) / dble(n_avg(i_tau))
     enddo
 
+    ! now normalize by SqCt(t=0)
+    do i_index=1, size(SqCt_aa(:,1,1))
+        do i_type=1,4
+            norm = SqCt_aa(i_index,i_type,1)
+           do i_tau=1, nmax_tcf
+                SqCt_aa(i_index,i_type,i_tau) = SqCt_aa(i_index,i_type,i_tau) / norm
+           enddo
+        enddo 
+    enddo
 
     ! now loop through k indices and fill in kmag_1D array from kk_avg
     do i_k=1,max_index_list(1)
@@ -539,20 +579,19 @@ contains
   !  anion-anion, and cation-anion cross structure factors
   !  
   !*********************************
-  subroutine Sq_TCF_print( Sq2_a_b, kmag_1Dall_avg , nkmag_all, SqCt_avg, dt, kmag_1D_avg, nmax_tcf, nkmag, suffix, dfti_desc )
+  subroutine Sq_TCF_print( Sq2_a_b, kmag_1Dall_avg , nkmag_all, SqCt_avg, kmag_1D_avg, nmax_tcf, nkmag, suffix, dfti_desc )
     use pme_routines
     use MKL_DFTI
     use global_variables
     real*8,dimension(:,:,:), intent(in) :: Sq2_a_b, SqCt_avg
     real*8,dimension(:) ,    intent(in) :: kmag_1Dall_avg, kmag_1D_avg
     integer, intent(in)                 :: nmax_tcf, nkmag, nkmag_all
-    real*8 , intent(in)                 :: dt
     character(1), intent(in)            :: suffix   ! this should be "n" or "c" corresponding to number or charge S(q)
     TYPE(DFTI_DESCRIPTOR), pointer,intent(inout):: dfti_desc
 
     real*8,dimension(:), allocatable  :: Comega
     integer        :: i_k, i_type, i_t
-    real*8         :: time, omega, fq,Sq_print
+    real*8         :: time, omega, norm,Sq_print
     character(100) :: filecatCt_out, fileanCt_out, filecatanCt_out, filetotCt_out
     character(100) :: filecatCw_out, fileanCw_out, filecatanCw_out, filetotCw_out
     character(100) :: filecatSq_out, fileanSq_out, filecatanSq_out, filetotSq_out
@@ -623,28 +662,43 @@ contains
        ! if number density structure factor, multiply by approximate f(q)
        Select Case(suffix)
        Case('n')
-           fq = form_factor_approx( kmag_1Dall_avg(i_k) )
+           ! normalize by 1/sum_i(fq_i**2), thus form factors cancel out in our
+           ! approximation of same q dependence for f(q) of each element
+           !norm = form_factor_approx( kmag_1Dall_avg(i_k) )
+           norm = 1d0 / dble(fq_norm)
        Case default
-           fq = 1d0
+           ! convert from q^2/A to kJ/mol
+           norm = 2625.4996 / 1.88973
+           ! normalize for sum-rule
+           ! for non-polarizable simulations, we have 4*pi/kT * Sq/q**2 = 1
+           norm = norm * 4d0 * pi / ( 0.008314462d0 * temperature )
        End Select
 
        ! cation
-       Sq_print = fq*Sq2_a_b(i_k,1,1)
+       Sq_print = norm*Sq2_a_b(i_k,1,1)
        write(ifile5,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
-       Sq_print = fq*Sq2_a_b(i_k,1,1) / kmag_1Dall_avg(i_k)**2
+       Sq_print = norm*Sq2_a_b(i_k,1,1) / kmag_1Dall_avg(i_k)**2
        write(ifile9,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
        ! anion
-       Sq_print = fq*Sq2_a_b(i_k,2,2)
+       Sq_print = norm*Sq2_a_b(i_k,2,2)
        write(ifile6,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
-       Sq_print = fq*Sq2_a_b(i_k,2,2) / kmag_1Dall_avg(i_k)**2
+       Sq_print = norm*Sq2_a_b(i_k,2,2) / kmag_1Dall_avg(i_k)**2
        write(ifile10,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
        ! cation-anion
-       Sq_print = fq*Sq2_a_b(i_k,1,2)
+       Sq_print = norm*Sq2_a_b(i_k,1,2)
        write(ifile7,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
-       Sq_print = fq*Sq2_a_b(i_k,1,2) / kmag_1Dall_avg(i_k)**2
+       Sq_print = norm*Sq2_a_b(i_k,1,2) / kmag_1Dall_avg(i_k)**2
        write(ifile11,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
        ! total
-       Sq_print = fq*(Sq2_a_b(i_k,1,1) + Sq2_a_b(i_k,2,2) + 2 * Sq2_a_b(i_k,1,2))
+       ! depends on whether we have solvent or not...
+       Select Case(n_atom_type)
+         Case(2)
+         ! no solvent
+         Sq_print = norm*(Sq2_a_b(i_k,1,1) + Sq2_a_b(i_k,2,2) + 2 * Sq2_a_b(i_k,1,2))
+         Case(3)
+         ! solvent presenti
+       Sq_print = norm*Sq2_a_b(i_k,3,3)
+       End Select
        write(ifile8,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
        Sq_print = Sq_print / kmag_1Dall_avg(i_k)**2
        write(ifile12,'(F14.6, E20.6)') kmag_1Dall_avg(i_k), Sq_print
@@ -654,13 +708,13 @@ contains
     allocate( Comega(size(SqCt_avg(1,1,:))) )
 
     ! now print correlation function, all wavevectors to each file
-    ! don't need fq prefactor here, as we normalize to Ct(0)
+    ! don't need norm prefactor here, as we normalize to Ct(0)
 
-    if ( nk_print > nkmag ) then
-       write(*,*) "nk_print > nkmag , please increase setting of nkmag "
-       write(*,*) "ACF calculation"
-       stop
-    end if
+!    if ( nk_print > nkmag ) then
+!       write(*,*) "nk_print > nkmag , please increase setting of nkmag "
+!       write(*,*) "ACF calculation"
+!       stop
+!    end if
 
     do i_k=2, nkmag   ! this would print a lot of correlation functions
     !   dt is in ps
@@ -685,55 +739,54 @@ contains
 
        ! cation C(t)
        do i_t=1,nmax_tcf
-          time=(i_t-1)*dt
+          time=(i_t-1)*time_step
           write(ifile1,'(F14.1, E20.6)') time , SqCt_avg(i_k,1,i_t) 
        enddo
        ! cation C(w)
        Comega(:) = SqCt_avg(i_k,1,:)
        call compute_FFT_1D_temporal( Comega , dfti_desc )
        do i_t=1,nmax_tcf
-             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * dt ) 
+             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * time_step ) 
              write(ifile13,'(E14.6, E20.6)') omega , Comega(i_t)
        enddo
 
        ! anion C(t)
        do i_t=1,nmax_tcf
-          time=(i_t-1)*dt
+          time=(i_t-1)*time_step
           write(ifile2,'(F14.1, E20.6)') time , SqCt_avg(i_k,2,i_t)
        enddo
        ! anion C(w)
        Comega(:) = SqCt_avg(i_k,2,:)
        call compute_FFT_1D_temporal( Comega , dfti_desc )
        do i_t=1,nmax_tcf
-             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * dt )
+             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * time_step )
              write(ifile14,'(E14.6, E20.6)') omega , Comega(i_t)
        enddo
 
        ! cation-anion C(t)
        do i_t=1,nmax_tcf
-          time=(i_t-1)*dt
+          time=(i_t-1)*time_step
           write(ifile3,'(F14.1, E20.6)') time , SqCt_avg(i_k,3,i_t)
        enddo
        ! cation-anion C(w)
        Comega(:) = SqCt_avg(i_k,3,:)
        call compute_FFT_1D_temporal( Comega , dfti_desc )
        do i_t=1,nmax_tcf
-             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * dt )
+             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * time_step )
              write(ifile15,'(E14.6, E20.6)') omega , Comega(i_t)
        enddo
 
 
        ! total C(t)
        do i_t=1,nmax_tcf
-          time=(i_t-1)*dt
-          Sq_print = SqCt_avg(i_k,1,i_t) + SqCt_avg(i_k,2,i_t) + 2 * SqCt_avg(i_k,3,i_t)
-          write(ifile4,'(F14.1, E20.6)') time , Sq_print
+          time=(i_t-1)*time_step
+          write(ifile4,'(F14.1, E20.6)') time , SqCt_avg(i_k,4,i_t)
        enddo
        ! total C(w)
-       Comega(:) = SqCt_avg(i_k,1,:) + SqCt_avg(i_k,2,:) + 2 * SqCt_avg(i_k,3,:)
+       Comega(:) = SqCt_avg(i_k,4,:)
        call compute_FFT_1D_temporal( Comega , dfti_desc )
        do i_t=1,nmax_tcf
-             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * dt )
+             omega = 2d0 * pi * dble(i_t - 1) / (dble(nmax_tcf) * time_step )
              write(ifile16,'(E14.6, E20.6)') omega , Comega(i_t)
        enddo
 
