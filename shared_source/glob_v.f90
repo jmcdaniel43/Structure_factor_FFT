@@ -34,7 +34,7 @@ module global_variables
 
    ! FFT
    integer            :: pme_max_print  ! this should be less than or equal to the setting of pme_grid
-   integer, parameter :: pme_grid=60
+   integer, parameter :: pme_grid=80
    integer,parameter :: spline_order=6
    integer, parameter :: spline_grid = 100000
    real*8,dimension(spline_grid) :: B6_spline, B5_spline, B4_spline, B3_spline 

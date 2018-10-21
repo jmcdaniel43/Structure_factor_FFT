@@ -115,7 +115,7 @@ contains
           call trim_head( aname )
           call fill_atomic_number( i_atom, aname )
           ! sum up norm
-          fq_norm = fq_norm + atomic_number(i_atom)**2
+          fq_norm = fq_norm + atomic_number(i_atom)
        End Select
        ! convert nm to angstoms
        xyz(i_atom,:) = xyz(i_atom,:) * 10d0

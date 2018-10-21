@@ -160,8 +160,9 @@ contains
              SQc_a(i_type,:,:,:) = FQc*B
           enddo
 
-          ! normalize by volume.  Stot=Sa*Sb/Volume, so multiply each  1 / vol**(1/2)
-          SQn_a = SQn_a / vol**(0.5d0)
+          ! normalize by volume (numerator).  Stot=Sa*Sb/Volume, so multiply each by  vol**(1/2)
+          SQn_a = SQn_a * vol**(0.5d0)
+          ! normalize by volume (denominator).  Stot=Sa*Sb/Volume, so multiply each  1 / vol**(1/2)
           SQc_a = SQc_a / vol**(0.5d0)
 
           ! now create all the cross SQ2 structure factors for this snapshot
@@ -662,10 +663,15 @@ contains
        ! if number density structure factor, multiply by approximate f(q)
        Select Case(suffix)
        Case('n')
-           ! normalize by 1/sum_i(fq_i**2), thus form factors cancel out in our
+           ! normalize by 1/sum_i(fq_i)**2, thus form factors cancel out in our
            ! approximation of same q dependence for f(q) of each element
            !norm = form_factor_approx( kmag_1Dall_avg(i_k) )
-           norm = 1d0 / dble(fq_norm)
+           norm = 1d0 / dble(fq_norm)**2
+           ! normalize by 1/kT and convert from Ang^3/kJ/mol to Pascal
+           ! which is N_A / 10^30 * 1kJ/ 10^3 J= 6.022D-10)
+           norm = norm / ( 0.008314462d0 * temperature  ) *  6.022D-10   ! conversion
+           ! convert compressibility units from Pa^-1 to 10^6 bar^-1
+           norm = norm *1.0D11
        Case default
            ! convert from q^2/A to kJ/mol
            norm = 2625.4996 / 1.88973
