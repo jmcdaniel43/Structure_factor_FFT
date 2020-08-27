@@ -1,0 +1,5 @@
+pme_max_print         20       ! not used in Sq_Ct_FFT code
+q_space               0.01     ! resolution for radial average of S(q)
+k_mag_max             1.8      ! Ang^-1, maximum wavevector for computing correlation function
+nmax_tcf_frac         0.1      ! maximum delta_t for which to compute correlation functions, in terms of total simulation time
+n_threads             1
