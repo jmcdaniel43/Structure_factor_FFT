@@ -1,22 +1,24 @@
 #!/bin/bash
 
 
-module load intel/12.1.4
-module load openmpi/1.6
-module load mkl/10.0
+module load intel/19.0.5
 
-
-#export PATH=$PATH:/opt/intel/mkl/10.0.3.020/include/
-#export LD_LIBRARY_PATH=/opt/intel/composerxe-2011.2.137/mkl/lib/intel64/:$LD_LIBRARY_PATH
-
-OMPINCLUDE=/usr/local/pacerepov1/openmpi/1.6/intel-12.1.4/lib/openmpi/
-MKLLIB=/usr/local/pacerepov1/intel/mkl/10.0.5.25/lib/em64t/
-
+COMPILER=mpiifort
+MKLLIB="-L${MKLROOT}/lib/intel64"
 include="../shared_source/"
 
-#OPT="-openmp -static -check bounds -check uninit -check format -warn declarations -traceback"  #-warn unused 
+#OPT="-qopenmp -static"
+OPT="-qopenmp -static -check bounds -check uninit -check format -warn declarations -traceback"  #-warn unused 
+FFLAGS="-O3 -mkl=sequential $MKLLIB -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -liomp5 -lpthread -ldl "
 
-OPT="-openmp -static"
+# turn this on if you want to profile the code ...
+#FFLAGS="-O3 -profile-functions -mkl=sequential $MKLLIB -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -liomp5 -lpthread -ldl "
 
-ifort $OPT -c ${include}glob_v.f90 ${include}routines.f90 ${include}pme.f90 structure_factor.f90 ${include}main_structure.f90  -I$MKLLIB -I$OMPINCLUDE -I${include}mkl_modules
-ifort $OPT *.o -L$MKLLIB -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -L$OMPINCLUDE -lompi_dbg_msgq -o main_structure
+echo MKLROOT: $MKLROOT
+echo MKLLIB: $MKLLIB
+echo FFLAGS: $FFLAGS
+
+export KMP_AFFINITY=verbose,none
+
+$COMPILER $FFLAGS -c ${include}glob_v.f90 ${include}routines.f90 ${include}pme.f90 structure_factor.f90 ${include}main_structure.f90
+$COMPILER $FFLAGS *.o $MKLLIB  -o main_structure

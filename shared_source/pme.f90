@@ -1,3 +1,6 @@
+
+include 'mkl_dfti.f90'
+
 module pme_routines
   use routines
   implicit none
